@@ -38,10 +38,7 @@ afterEach(async () => {
 });
 async function networkFunctions() {
   const source = await readFile('../internal/platform/network_ufi.sh', 'utf8');
-  return (
-    'PROTECTED_PORTS=7894,1053\n' +
-    source.slice(source.indexOf('MARK='), source.indexOf('\nPROTECTED_PORTS='))
-  );
+  return source.slice(source.indexOf('MARK='), source.indexOf('\ncase "$ACTION" in'));
 }
 
 test('input validation and shell results preserve the trust boundary', async () => {
@@ -147,9 +144,14 @@ network_start`;
   expect((await run()).code).toBe(1);
 });
 
-test('startup and missing-LAN states keep listener guards without capturing traffic', async () => {
+test.each([undefined, '7894,1053,7890,7891,7892,7893,9191'])('without multiport, startup and missing-LAN states protect all listeners (%s)', async (configuredPorts) => {
   const dir = await mkdtemp(join(tmpdir(), 'mihomoctl-guards-'));
   temporary.push(dir);
+  if (configuredPorts) {
+    await mkdir(join(dir, 'current'));
+    await writeFile(join(dir, 'current/ports'), configuredPorts);
+  }
+  const ports = (configuredPorts || '7894,1053').split(',');
   for (const name of [
     'routes',
     'rules',
@@ -170,22 +172,32 @@ test('startup and missing-LAN states keep listener guards without capturing traf
       { encoding: 'utf8', timeout: 10_000 },
     );
     const error = proc.stderr;
-    expect(proc.status).toBe(0);
+    expect(proc.status, error).toBe(0);
     expect(error).toBe('');
   };
   await run('ACTION=prepare network_start');
-  expect(
-    await readFile(join(dir, 'fw-4-filter-UFI_MH_IN_A'), 'utf8'),
-  ).toContain('--dports 7894,1053 -j REJECT');
-  expect(
-    await readFile(join(dir, 'fw-6-filter-UFI_MH_IN6_A'), 'utf8'),
-  ).toContain('--dports 7894,1053 -j REJECT');
+  for (const chain of ['fw-4-filter-UFI_MH_IN_A', 'fw-6-filter-UFI_MH_IN6_A']) {
+    const rules = (await readFile(join(dir, chain), 'utf8')).trim().split('\n');
+    expect(rules[0]).toBe('-i lo -j RETURN');
+    expect(rules.some((rule) => rule.endsWith('-j ACCEPT'))).toBe(false);
+    for (const proto of ['tcp', 'udp']) for (const port of ports)
+      expect(rules).toContain(`-p ${proto} --dport ${port} -j REJECT`);
+  }
   expect(
     await readFile(join(dir, 'fw-4-mangle-UFI_MH_A'), 'utf8'),
   ).not.toContain('TPROXY');
   await writeFile(join(dir, 'ready'), '');
   await writeFile(join(dir, 'interfaces'), 'wlan0');
   await run('network_sync');
+  for (const chain of ['fw-4-filter-UFI_MH_IN_B', 'fw-6-filter-UFI_MH_IN6_B']) {
+    const rules = (await readFile(join(dir, chain), 'utf8')).trim().split('\n');
+    for (const proto of ['tcp', 'udp']) for (const port of ports) {
+      const accept = rules.indexOf(`-i wlan0 -p ${proto} --dport ${port} -j ACCEPT`);
+      const reject = rules.indexOf(`-p ${proto} --dport ${port} -j REJECT`);
+      expect(accept).toBeGreaterThan(0);
+      expect(reject).toBeGreaterThan(accept);
+    }
+  }
   await writeFile(join(dir, 'local-addresses'), '1: lo inet 127.0.0.1/8 scope host lo\n2: rmnet_data0 inet 203.0.113.9/32 scope global rmnet_data0\n');
   await run('network_sync');
   let localSlot = (await readFile(join(dir, 'network.active'), 'utf8')).split('\n')[0]!;
@@ -236,6 +248,22 @@ test('firewall probe uses unhooked rules and cleanup never treats failed reads a
   expect(existsSync(join(dir, 'network.owned'))).toBe(false);
   expect(await readFile(join(dir, 'fw-4-mangle-PREROUTING'), 'utf8')).toBe('');
   await rm(join(dir, 'no-tproxy'));
+  await mkdir(join(dir, 'current'));
+  for (const invalid of [',,,', ',7894', '7894,', '7894,,1053']) {
+    await writeFile(join(dir, 'current/ports'), invalid);
+    const rejected = run('network_check');
+    expect(rejected.status).toBe(1);
+    expect(rejected.stderr).toContain('监听保护端口列表无效');
+    expect(existsSync(join(dir, 'network.owned'))).toBe(false);
+  }
+  await writeFile(join(dir, 'current/ports'), '7894,1053,9191');
+  await writeFile(join(dir, 'fail-guard'), '');
+  const failedGuard = run('network_check');
+  expect(failedGuard.status).toBe(1);
+  expect(failedGuard.stderr).toContain('listener guard rejected');
+  expect(existsSync(join(dir, 'network.owned'))).toBe(false);
+  expect(await readFile(join(dir, 'fw-4-mangle-PREROUTING'), 'utf8')).toBe('');
+  await rm(join(dir, 'fail-guard'));
   expect(run('network_check').status).toBe(0);
   const calls = await readFile(join(dir, 'network.calls'), 'utf8');
   expect(calls).toContain('-p tcp ! --dport 53 -j TPROXY');

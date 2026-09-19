@@ -17,8 +17,12 @@ fake_iptables() {
     return 0
   fi
   case " $* " in *' -m addrtype '*) echo "Couldn't find match addrtype" >&2; return 1;; esac
+  case " $* " in *' -m multiport '*) echo "Couldn't find match multiport" >&2; return 1;; esac
   if [ -f "$DIR/no-tproxy" ]; then
     case " $* " in *' -j TPROXY '*) echo 'TPROXY target unavailable' >&2; return 1;; esac
+  fi
+  if [ "$family" = 6 ] && [ -f "$DIR/fail-guard" ]; then
+    case " $* " in *' -p udp --dport 9191 -j REJECT '*) echo 'listener guard rejected' >&2; return 1;; esac
   fi
   file="$DIR/fw-$family-$table-$chain"
   printf '%s %s %s %s %s\n' "$family" "$table" "$operation" "$chain" "$*" >> "$DIR/network.calls"

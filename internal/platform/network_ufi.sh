@@ -150,6 +150,9 @@ network_stop() {
 }
 
 build_slot() {
+  # Android may omit multiport; expand the same protected set into basic port matches.
+  case "$PROTECTED_PORTS" in ,*|*,|*,,*) echo '监听保护端口列表无效' >&2; return 1;; esac
+  protected_ports=$(printf '%s' "$PROTECTED_PORTS" | tr ',' ' ') || return 1
   for group in 'ipt mangle UFI_MH' 'ipt nat UFI_MH_DNS' 'ip6t filter UFI_MH6' 'ipt filter UFI_MH_IN' 'ip6t filter UFI_MH_IN6'; do
     # shellcheck disable=SC2086
     set -- $group
@@ -172,16 +175,20 @@ build_slot() {
   for iface in $selected; do
     ipt -A "UFI_MH_IN_$next" -i "$iface" -m mark --mark "$MARK/$MARK" -j ACCEPT || return 1
     for proto in tcp udp; do
-      ipt -A "UFI_MH_IN_$next" -i "$iface" -p "$proto" -m multiport --dports "$PROTECTED_PORTS" -j ACCEPT || return 1
-      ip6t -A "UFI_MH_IN6_$next" -i "$iface" -p "$proto" -m multiport --dports "$PROTECTED_PORTS" -j ACCEPT || return 1
+      for port in $protected_ports; do
+        ipt -A "UFI_MH_IN_$next" -i "$iface" -p "$proto" --dport "$port" -j ACCEPT || return 1
+        ip6t -A "UFI_MH_IN6_$next" -i "$iface" -p "$proto" --dport "$port" -j ACCEPT || return 1
+      done
       ipt -t mangle -A "UFI_MH_$next" -i "$iface" -p "$proto" ! --dport 53 -j TPROXY --on-port 7894 --tproxy-mark "$MARK/$MARK" || return 1
       ipt -t nat -A "UFI_MH_DNS_$next" -i "$iface" -p "$proto" --dport 53 -j REDIRECT --to-ports 1053 || return 1
     done
     ip6t -A "UFI_MH6_$next" -i "$iface" -j REJECT --reject-with icmp6-adm-prohibited || return 1
   done
   for proto in tcp udp; do
-    ipt -A "UFI_MH_IN_$next" -p "$proto" -m multiport --dports "$PROTECTED_PORTS" -j REJECT || return 1
-    ip6t -A "UFI_MH_IN6_$next" -p "$proto" -m multiport --dports "$PROTECTED_PORTS" -j REJECT || return 1
+    for port in $protected_ports; do
+      ipt -A "UFI_MH_IN_$next" -p "$proto" --dport "$port" -j REJECT || return 1
+      ip6t -A "UFI_MH_IN6_$next" -p "$proto" --dport "$port" -j REJECT || return 1
+    done
   done
 }
 
@@ -247,7 +254,7 @@ network_check() {
   result=0
   build_slot || result=$?
   network_stop || { echo '能力检查后的清理失败' >&2; return 1; }
-  [ "$result" = 0 ] || { echo '设备缺少 TProxy/DNS 或监听保护所需的防火墙能力' >&2; return "$result"; }
+  [ "$result" = 0 ] || { echo '防火墙规则检查失败，请查看上方具体错误' >&2; return "$result"; }
 }
 
 network_start() {
