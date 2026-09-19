@@ -4,7 +4,6 @@ import {
   readBootstrap,
   readUninstallJob,
   jobLog,
-  baseURL,
   deviceLogs,
 } from './transport/ufi';
 import type { DeviceJob } from './state';
@@ -131,19 +130,18 @@ async function formatTaskDetails(task: DeviceJob) {
     runtime && '运行日志（最近输出）\n' + runtime].filter(Boolean).join('\n\n');
 }
 
-export function controllerURL(base: string, port: number) {
+export function dashboardURL(base: string, port: number, secret: string) {
   if (!Number.isInteger(port) || port < 1024 || port > 65535)
     throw new Error('无效面板端口');
   const url = new URL(base);
   url.protocol = 'http:';
   url.port = String(port);
   url.pathname = '/ui/';
-  url.search = '';
-  url.hash = '';
+  url.search = new URLSearchParams({ hostname: url.hostname, port: String(port), secret }).toString();
+  // Setup imports changed credentials even when Zashboard already has an active backend,
+  // then automatically navigates to /proxies after connecting.
+  url.hash = '/setup';
   url.username = '';
   url.password = '';
   return url.href;
-}
-export function dashboardURL(port: number) {
-  return controllerURL(baseURL(), port);
 }

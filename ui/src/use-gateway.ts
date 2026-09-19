@@ -1,4 +1,4 @@
-import { waitTask, describeTask, taskDetails, TaskCancelled, TaskFailed } from './gateway';
+import { waitTask, describeTask, taskDetails, TaskCancelled, TaskFailed, dashboardURL } from './gateway';
 import { useEffect, useRef, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import PQueue from 'p-queue';
@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { subscriptionURL, interfaces, releaseProxy, controllerSettings } from './config';
 import {
   bootstrapAgent,
+  baseURL,
   uninstallAgent,
   cancelDeviceTask,
   checkUpdates,
@@ -179,6 +180,36 @@ export function useGateway() {
     } finally {
       cancelPending.current = false;
       setCancelling(false);
+    }
+  };
+
+  const openDashboard = async () => {
+    if (busyRef.current || disabledReason('open-dashboard', deviceRef.current)) return;
+    busyRef.current = true;
+    setBusy('open-dashboard');
+    let popup: Window | null = null;
+    try {
+      // Open during the click event, before async work loses browser user activation.
+      popup = window.open('about:blank', '_blank');
+      if (!popup) throw new Error('浏览器阻止了新标签页，请允许弹出窗口后重试');
+      popup.opener = null;
+      popup.document.title = '正在连接 Zashboard…';
+      const referrer = popup.document.createElement('meta');
+      referrer.name = 'referrer';
+      referrer.content = 'no-referrer';
+      popup.document.head.append(referrer);
+      popup.document.body.textContent = '正在读取连接信息…';
+      const state = await readState();
+      const reason = disabledReason('open-dashboard', state);
+      if (reason) throw new Error(reason);
+      const key = await readControllerSecret();
+      if (!popup.closed) popup.location.replace(dashboardURL(baseURL(), state.controller!.port, key));
+    } catch (error) {
+      popup?.close();
+      toast.error(error instanceof Error ? error.message : String(error), { toasterId: 'mihomoctl' });
+    } finally {
+      busyRef.current = false;
+      setBusy(null);
     }
   };
 
@@ -603,6 +634,7 @@ export function useGateway() {
     validate,
     autosave,
     perform,
+    openDashboard,
     open,
     detail,
     detailTitle,

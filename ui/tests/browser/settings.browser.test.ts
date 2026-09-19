@@ -4,6 +4,34 @@ import { app, evaluate, idle, closeModal, open, reload } from './app';
 
 const panelYaml = (port: number, extra = '') => `external-controller: 0.0.0.0:${port}\n${extra}`;
 
+function stubDashboardWindow() {
+  evaluate(`window.open = (url, target) => {
+    window.mockPopup = {
+      url, target, opener: window, closed: false,
+      document: document.implementation.createHTMLDocument(),
+      location: { replace: value => { mockPopup.url = value; } },
+      close: () => { mockPopup.closed = true; },
+    };
+    return mockPopup;
+  }`);
+}
+
+async function openDashboard(port: number, secret: string) {
+  stubDashboardWindow();
+  await app.getByCSS('[data-action=open-dashboard]').click();
+  await idle();
+  const url = new URL(evaluate<string>('mockPopup.url'));
+  expect(url.port).toBe(String(port));
+  expect(url.pathname).toBe('/ui/');
+  expect(url.hash).toBe('#/setup');
+  expect(url.searchParams.get('hostname')).toBe(url.hostname);
+  expect(url.searchParams.get('port')).toBe(String(port));
+  expect(url.searchParams.get('secret')).toBe(secret);
+  expect(evaluate('mockPopup.opener')).toBeNull();
+  expect(evaluate('mockPopup.document.querySelector("meta[name=referrer]").content')).toBe('no-referrer');
+  expect(evaluate(`mockCommands.every(c => !c.includes(${JSON.stringify(secret)}))`)).toBe(true);
+}
+
 test('unsaved drafts cancel navigation with the current browser event API', async () => {
   await open('ready');
   const canLeave = () => evaluate('window.dispatchEvent(new Event("beforeunload", { cancelable: true }))');
@@ -73,9 +101,7 @@ test('controller transactions, encrypted secrets and task details', async () => 
   await app.getByRole('tab', { name: '设置', exact: true }).click();
   await expect.element(app.getByCSS('#ufi-controller-yaml-error')).toBeVisible();
   expect(evaluate('mockIntents.length')).toBe(0);
-  await expect
-    .element(app.getByCSS('[data-dashboard-link]'))
-    .toHaveAttribute('href', expect.stringContaining(':9090/ui/'));
+  await openDashboard(9090, 'mock-controller-key-not-a-real-secret');
   await app.getByCSS('#ufi-controller-yaml').fill(panelYaml(9191, 'secret: short\n'));
   await evaluate('window.mockTaskDelayMs = 5000');
   await app.getByCSS('[data-action=save-controller]').click();
@@ -89,12 +115,7 @@ test('controller transactions, encrypted secrets and task details', async () => 
     .poll(() => evaluate('mockDeviceState.controller.port === 9191'))
     .toBeTruthy();
   await idle();
-  await expect
-    .element(app.getByCSS('[data-dashboard-link]'))
-    .toHaveAttribute('href', expect.stringContaining(':9191/ui/'));
-  await expect
-    .element(app.getByCSS('[data-dashboard-link]'))
-    .not.toHaveAttribute('href', expect.stringContaining('secret'));
+  await openDashboard(9191, 'short');
   await expect.element(app.getByCSS('#ufi-controller-yaml')).toHaveValue(panelYaml(9393, 'secret: newer-draft-secret\n'));
   await app.getByRole('button', { name: '查看当前密钥', exact: true }).click();
   await expect
@@ -144,6 +165,30 @@ test('controller transactions, encrypted secrets and task details', async () => 
   await idle();
   expect(evaluate('mockDeviceState.controller.port')).toBe(9191);
   await expect.element(app.getByCSS('#ufi-controller-yaml')).toHaveValue(panelYaml(9292));
+});
+
+test('dashboard handles blocked popups, failed secret reads and encoded credentials', async () => {
+  await open('running');
+  await evaluate('window.open = () => null');
+  await app.getByCSS('[data-action=open-dashboard]').click();
+  await expect.element(app.getByText('浏览器阻止了新标签页，请允许弹出窗口后重试')).toBeVisible();
+  await idle();
+
+  stubDashboardWindow();
+  await evaluate('window.mockSecretFailure = true');
+  await app.getByCSS('[data-action=open-dashboard]').click();
+  await expect.poll(() => evaluate('mockPopup.closed')).toBe(true);
+  expect(evaluate('mockPopup.url')).toBe('about:blank');
+  await expect.element(app.getByText('模拟密钥读取失败', { exact: false })).toBeVisible();
+  await idle();
+
+  await evaluate('window.mockSecretFailure = false');
+  await app.getByRole('tab', { name: '设置', exact: true }).click();
+  const key = 'key &#+%?中文';
+  await app.getByCSS('#ufi-controller-yaml').fill(panelYaml(9191, `secret: ${JSON.stringify(key)}\n`));
+  await app.getByCSS('[data-action=save-controller]').click();
+  await idle();
+  await openDashboard(9191, key);
 });
 
 test('update checks show component results without submitting mutations or clearing drafts', async () => {

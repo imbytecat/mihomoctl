@@ -13,9 +13,8 @@ import {
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { disabledReason, topTask } from '../state';
-import { dashboardURL } from '../gateway';
 import type { GatewayModel, Operation } from '../use-gateway';
-import { ActionButton, Button, Hint, buttonStyle } from './ui';
+import { ActionButton, Button, Hint } from './ui';
 
 export function stageOf(model: GatewayModel) {
   const device = model.device;
@@ -207,21 +206,16 @@ export function Overview({
       {device?.locked && !topTask(device.task) && <Hint error>控制锁尚未释放，请查看最近任务和运行日志。</Hint>}
       {device?.service && (
         <div className="ufi:mt-3">
-          {dashboardReason ? (
-            <Button full disabled title={dashboardReason}>
-              打开面板
-            </Button>
-          ) : (
-            <a
-              data-dashboard-link
-              className={`${buttonStyle} ufi:w-full ufi:bg-white/5 ufi:text-inherit ufi:hover:bg-white/10`}
-              href={dashboardURL(device.controller!.port)}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              打开面板
-            </a>
-          )}
+          <Button
+            data-action="open-dashboard"
+            full
+            disabled={!!dashboardReason}
+            title={dashboardReason}
+            loading={busy === 'open-dashboard'}
+            onClick={() => void model.openDashboard()}
+          >
+            {busy === 'open-dashboard' ? '正在打开面板…' : '打开面板'}
+          </Button>
           <Hint>{dashboardReason}</Hint>
         </div>
       )}

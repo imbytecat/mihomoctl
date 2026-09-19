@@ -45,7 +45,7 @@ ssh -N -L 9090:127.0.0.1:9090 root@设备地址
 {"controller":{"enabled":true,"port":9090,"secret":"your-key"}}
 ```
 
-Dashboard 链接不携带密钥，登录时输入所设置的密钥。
+在面板连接页输入所设置的密钥；UFI 插件的「打开面板」会自动填入当前连接信息。
 
 ## 自启与卸载
 

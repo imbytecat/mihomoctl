@@ -83,6 +83,7 @@ const uploads: { name: string; bytes: Uint8Array }[] = [];
 const keys = sodium.ready.then(() => sodium.crypto_box_keypair());
 const flags = globalThis as typeof globalThis & {
   mockProbeError?: boolean;
+  mockSecretFailure?: boolean;
   mockRuntimeLog?: string;
   mockUpdateFailure?: boolean;
   mockUploadFailure?: boolean;
@@ -365,6 +366,7 @@ Object.assign(globalThis, {
             save();
             break;
           case 'controller-secret':
+            if (flags.mockSecretFailure) throw new Error('模拟密钥读取失败');
             result = sodium.to_base64(
               sodium.crypto_box_seal(
                 sodium.from_string(args.includes('--config') ? overrides || defaultOverrides() : controllerSecret),

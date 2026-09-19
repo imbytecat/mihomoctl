@@ -22,7 +22,7 @@
 
 - UFI uploads 公开可读，Root Shell 会记录命令和响应。请求使用 libsodium sealed box；上传先校验文件类型、大小和摘要，再交给 Manager。明文订阅、配置、密钥不能进入公开文件、命令参数或响应日志。
 - 本地 CLI 的秘密通过 JSON 文件 / stdin 传入，不通过 argv。结构化 params 拒绝未知字段与不适用参数；不保留旧 value 字段或嵌套 JSON。
-- 密钥读取仍通过浏览器临时公钥加密响应。Dashboard 链接不携带密钥。SQLite 不是整库加密，私有目录、0600 数据库和秘密脱敏仍必需。
+- 密钥读取仍通过浏览器临时公钥加密响应。用户点击打开面板时，浏览器读取当前密钥并构造 Zashboard 自动连接 URL；密钥不进入 Root Shell 明文或公开上传文件。SQLite 不是整库加密，私有目录、0600 数据库和秘密脱敏仍必需。
 - Submit 持有 control.lock，将锁描述符传给 worker。worker 先等待启动 gate，接管后设置控制锁 FD_CLOEXEC，防止守护或内核继承控制锁；Linux 必须先进入 systemd scope 再放行，setsid 不能替代 cgroup 托管。
 - 接收任务时，状态、密文、HMAC 防重放摘要和最新任务指针在同一 SQLite 事务提交。相同语义请求重新加密后仍识别同一 ID；不同内容复用 ID 必须拒绝。
 - 进度和取消属于原任务：SQLite 保存下载字节、总量、速度、开始时间及取消标志。cancel 不获取 worker 持有的 control.lock、不创建新任务；取消接受与不可取消的提交边界通过条件 UPDATE 互斥，worker 通过 context 停止 I/O 并清理，不能用浏览器断开或强杀进程冒充取消。初装由引导脚本用任务目录内的控制锁串行化取消与安装交接，仅终止自己启动的 curl。

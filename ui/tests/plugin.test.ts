@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 import type { AddressInfo } from 'node:net';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { controllerURL, describeTask } from '../src/gateway';
+import { dashboardURL, describeTask } from '../src/gateway';
 import { afterEach, expect, vi, test } from 'vitest';
 import {
   mkdtemp,
@@ -503,12 +503,13 @@ test('UI gates actions by real prerequisites and keeps recovery actions accessib
     }),
   ).toBe('');
   expect(
-    controllerURL(
+    dashboardURL(
       'https://user:pass@192.168.0.1:8080/api?token=private#x',
       9090,
+      'key &#+%?中文',
     ),
-  ).toBe('http://192.168.0.1:9090/ui/');
-  expect(() => controllerURL('http://192.168.0.1/', 0)).toThrow();
+  ).toBe('http://192.168.0.1:9090/ui/?hostname=192.168.0.1&port=9090&secret=key+%26%23%2B%25%3F%E4%B8%AD%E6%96%87#/setup');
+  expect(() => dashboardURL('http://192.168.0.1/', 0, 'key')).toThrow();
 });
 
 test('request errors identify network, timeout, HTTP and malformed response stages', async () => {
