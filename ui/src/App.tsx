@@ -83,7 +83,7 @@ export default function Gateway({ container }: { container: HTMLElement }) {
               <Button
                 full
                 variant="danger"
-                onClick={() => model.setDetailOpen(true)}
+                onClick={() => { model.setLogSource('details'); model.setDetailOpen(true); }}
               >
                 查看错误详情
               </Button>
@@ -96,8 +96,7 @@ export default function Gateway({ container }: { container: HTMLElement }) {
           )}
           <Tabs.Root value={model.detailOpen ? 'logs' : tab} onValueChange={(value) => {
             if (value === 'logs') {
-              if (!model.detail && model.device?.agent) void model.showRuntimeLogs();
-              else model.setDetailOpen(true);
+              model.setDetailOpen(true);
             }
             else { setTab(String(value)); model.setDetailOpen(false); }
           }} className="ufi:mt-4">

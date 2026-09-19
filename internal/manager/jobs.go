@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -220,6 +221,7 @@ func (a *Manager) Worker(id string) (err error) {
 		return errors.New("任务不能重复执行")
 	}
 	started := time.Now()
+	var log *os.File
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil)).With("task", id, "action", job.Action)
 	defer func() {
 		if err != nil {
@@ -229,7 +231,15 @@ func (a *Manager) Worker(id string) (err error) {
 			logger.Error("任务失败", "phase", job.Phase, "error", strings.SplitN(job.Error, "\n", 2)[0], "duration", time.Since(started))
 			_ = a.writeJob(&job)
 		}
+		if log != nil {
+			_ = log.Close()
+		}
 	}()
+	log, err = os.OpenFile(a.runtime("tasks.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		return err
+	}
+	logger = slog.New(slog.NewTextHandler(io.MultiWriter(os.Stdout, log), nil)).With("task", id, "action", job.Action)
 	sealed, err := a.store.Request(id)
 	if err != nil {
 		return err
@@ -296,7 +306,7 @@ func (a *Manager) Worker(id string) (err error) {
 			job.Error = taskError(runErr)
 		}
 		if runErr != nil {
-			logger.Error("任务失败", "phase", job.Phase, "error", job.Error, "duration", time.Since(started))
+			logger.Error("任务失败", "phase", job.Phase, "error", strings.SplitN(job.Error, "\n", 2)[0], "duration", time.Since(started))
 		} else {
 			logger.Info("任务已取消", "phase", job.Phase, "duration", time.Since(started))
 		}

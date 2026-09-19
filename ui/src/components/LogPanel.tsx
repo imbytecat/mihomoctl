@@ -1,86 +1,100 @@
 import { useEffect, useRef, useState } from 'react';
+import { Tabs } from '@base-ui/react/tabs';
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import Anser from 'anser';
 import type { GatewayModel } from '../use-gateway';
-import { Button, Hint, Input } from './ui';
+import { Button, Hint, Input, focus } from './ui';
 
+const labels = { core: 'Mihomo', manager: '管理器', details: '任务 / 详情' } as const;
 export function LogPanel({ model }: { model: GatewayModel }) {
-  const [live, setLive] = useState(true);
-  const [following, setFollowingState] = useState(true);
-  const followingRef = useRef(true);
-  const setFollowing = (value: boolean) => { followingRef.current = value; setFollowingState(value); };
-  const [error, setError] = useState('');
-  const [updated, setUpdated] = useState<Date | null>(null);
-  const pending = useRef(false);
-  const output = useRef<HTMLPreElement>(null);
-  const [search, setSearch] = useState('');
+  const { logs, logSource: source } = model;
   const refresh = useRef(model.refreshDetail);
+  const [detailError, setDetailError] = useState('');
   refresh.current = model.refreshDetail;
-  const source = model.detailTitle;
-  const taskID = source === '任务详情' ? model.task?.id : undefined;
-  const taskEnded = source === '任务详情' && !!model.task && !['queued', 'running'].includes(model.task.state);
+  const taskEnded = !!model.task && !['queued', 'running'].includes(model.task.state);
   useEffect(() => {
-    setLive(true);
-    setError('');
-    setFollowing(true);
-  }, [source, taskID]);
-  useEffect(() => {
-    if (!model.detailOpen || !live || !following || !['任务详情', '运行日志'].includes(source)) return;
-    let stopped = false;
-    const poll = () => {
-      if (pending.current || document.hidden || !model.open.current) return;
-      pending.current = true;
-      void refresh.current(() => !stopped && followingRef.current && !document.hidden && model.open.current).then(() => { if (!stopped) { setError(''); setUpdated(new Date()); } })
-        .catch((error) => { if (!stopped) setError(error instanceof Error ? error.message : String(error)); })
-        .finally(() => { pending.current = false; });
+    if (!model.detailOpen || source !== 'details' || logs.paused || model.detailTitle !== '任务详情') return;
+    let stopped = false, pending = false;
+    const poll = async () => {
+      if (pending || document.hidden || !model.open.current) return;
+      pending = true;
+      try { await refresh.current(() => !stopped); if (!stopped) setDetailError(''); }
+      catch (error) { if (!stopped) setDetailError(error instanceof Error ? error.message : String(error)); }
+      finally { pending = false; }
     };
-    poll();
-    if (taskEnded) return () => { stopped = true; };
-    const timer = setInterval(poll, 1000);
+    void poll();
+    const timer = taskEnded ? undefined : setInterval(() => void poll(), 2000);
     return () => { stopped = true; clearInterval(timer); };
-  }, [model.detailOpen, live, following, source, taskID, taskEnded]);
-  useEffect(() => {
-    if (following && output.current) output.current.scrollTop = output.current.scrollHeight;
-  }, [model.detail, model.detailOpen, following, search]);
-  const lines = (model.detail || '暂无记录，可选择当前任务或运行日志。').split('\n').slice(-1000);
-  const visible = search ? lines.filter((line) => Anser.ansiToText(line).toLocaleLowerCase().includes(search.toLocaleLowerCase())) : lines;
+  }, [model.detailOpen, source, logs.paused, model.detailTitle, model.task?.id, taskEnded]);
+  const text = source === 'core' ? logs.core : source === 'manager' ? logs.manager : model.detail;
+  const download = () => {
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `mihomoctl-${source}.log`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
   return (
-    <div data-log-panel className="ufi:mt-4 ufi:rounded-2xl ufi:bg-[var(--mh-group)]">
-      <div className="ufi:p-4">
+    <div data-log-panel className="ufi:mt-4 ufi:rounded-2xl ufi:bg-[var(--mh-group)] ufi:p-4">
+      <Tabs.Root value={source} onValueChange={(value) => model.setLogSource(value as typeof source)}>
+        <Tabs.List aria-label="日志来源" className="ufi:mb-3 ufi:flex ufi:gap-1">
+          {(Object.entries(labels) as [typeof source, string][]).map(([value, label]) => (
+            <Tabs.Tab key={value} value={value} className={`ufi:m-0 ufi:min-h-11 ufi:min-w-0 ufi:flex-1 ufi:rounded-lg ufi:border-0 ufi:bg-transparent ufi:px-2 ufi:text-sm ufi:text-inherit ufi:cursor-pointer ufi:data-[active]:bg-white/10 ${focus}`}>{label}</Tabs.Tab>
+          ))}
+        </Tabs.List>
         <div className="ufi:mb-3 ufi:flex ufi:flex-wrap ufi:items-center ufi:gap-2">
-          <Button disabled={!model.task} onClick={() => void model.showTask()}>当前任务</Button>
-          <Button disabled={!model.device?.agent} onClick={() => void model.showRuntimeLogs()}>运行日志</Button>
-          <Button aria-pressed={live} onClick={() => setLive(!live)}>{live ? '暂停刷新' : '继续刷新'}</Button>
-          {!following && <Button onClick={() => setFollowing(true)}>跟随最新</Button>}
+          <Button aria-pressed={logs.paused} onClick={() => logs.setPaused(!logs.paused)}>{logs.paused ? '继续收集' : '暂停收集'}</Button>
+          <Button disabled={!text} onClick={download}>下载日志</Button>
+          {source !== 'details' && <Button disabled={!text} onClick={() => logs.clear(source)}>清空显示</Button>}
           {model.task?.cancellable && <Button disabled={model.cancelling || model.task.cancelRequested} onClick={() => void model.cancelTask()}>取消当前任务</Button>}
           <Button aria-label="关闭详情" onClick={() => model.setDetailOpen(false)}>返回</Button>
         </div>
-        <div className="ufi:mb-2 ufi:flex ufi:flex-wrap ufi:items-center ufi:justify-between ufi:gap-2 ufi:text-xs ufi:opacity-65">
-          <span data-log-source>{source}</span>
-          <span data-log-status>{!live || !following ? '已暂停' : ['任务详情', '运行日志'].includes(source) ? taskEnded ? '任务已结束' : '实时跟随 · 约 1 秒刷新' : '操作结果'}{updated && ` · ${updated.toLocaleTimeString()}`} · 最多 1000 行</span>
+        <div className="ufi:mb-2 ufi:flex ufi:flex-wrap ufi:justify-between ufi:gap-2 ufi:text-xs ufi:opacity-65">
+          <span data-log-source>{source === 'details' ? model.detailTitle : labels[source]}</span>
+          <span data-log-status>{logs.paused ? '已暂停收集' : !model.device?.agent ? '等待设备连接' : '自动收集 · 约 2 秒刷新'}{logs.updated && ` · ${logs.updated.toLocaleTimeString()}`}</span>
         </div>
-        <Input aria-label="搜索日志" type="search" placeholder="按关键词筛选日志" value={search}
-          className="ufi:mb-3" onChange={(event) => setSearch(event.target.value)} />
-        {source === '任务详情' && model.task?.error && (
-          <p data-log-summary className="ufi:my-2 ufi:whitespace-pre-wrap ufi:break-words ufi:text-xs ufi:text-[#ff6961]">
-            {[model.task.error.split('\n')[0], model.task.error.split('\n').find((line) => line.startsWith('清理结果：'))].filter(Boolean).join('\n')}
-          </p>
-        )}
-        <pre ref={output} data-output role="log" tabIndex={0} aria-label={source} aria-live="off"
-          className="ufi:m-0 ufi:h-80 ufi:overflow-auto ufi:rounded-xl ufi:bg-black/25 ufi:p-3 ufi:whitespace-pre-wrap ufi:wrap-break-word ufi:select-text ufi:font-mono ufi:text-xs ufi:leading-relaxed"
-          onScroll={(event) => { const node = event.currentTarget; setFollowing(node.scrollHeight - node.scrollTop - node.clientHeight < 24); }}>
-          {visible.length ? visible.map((line, index) => <span key={index} data-log-level={logLevel(line)}
-            className="ufi:data-[log-level=error]:text-[#ff6961] ufi:data-[log-level=warning]:text-[#ffd60a]">
-            {Anser.ansiToJson(line, { remove_empty: true }).map((part, index) => <span key={index}
-              style={{ color: part.fg ? `rgb(${part.fg})` : undefined, backgroundColor: part.bg ? `rgb(${part.bg})` : undefined }}
-              className={part.decorations.includes('bold') ? 'ufi:font-bold' : undefined}>{part.content}</span>)}{'\n'}
-          </span>) : '没有匹配的日志'}
-        </pre>
-        <Hint error>{error && `日志刷新失败：${error}`}</Hint>
-      </div>
+        {model.task?.error && <p data-log-summary className="ufi:my-2 ufi:whitespace-pre-wrap ufi:break-words ufi:text-xs ufi:text-[#ff6961]">
+          {[model.task.error.split('\n')[0], model.task.error.split('\n').find((line) => line.startsWith('清理结果：'))].filter(Boolean).join('\n')}
+        </p>}
+        {(['core', 'manager', 'details'] as const).map((value) => (
+          <Tabs.Panel key={value} value={value} keepMounted className="ufi:data-[hidden]:hidden">
+            <LogView text={value === 'core' ? logs.core : value === 'manager' ? logs.manager : model.detail}
+              active={source === value} label={value === 'details' ? model.detailTitle : labels[value]} />
+          </Tabs.Panel>
+        ))}
+        <Hint>上翻只停止滚动跟随，新日志仍会收集。当前页面每类保留最近 5000 行；切换页面标签不会清空。清空显示不删除设备日志。</Hint>
+        <Hint error>{logs.error && `日志读取失败：${logs.error}`}</Hint>
+        <Hint error>{source === 'details' && detailError && `任务详情读取失败：${detailError}`}</Hint>
+      </Tabs.Root>
     </div>
   );
 }
 
-function logLevel(text: string) {
-  return /\blevel="?error\b|失败|已被占用/.test(text) ? 'error' : /\blevel="?warn(?:ing)?\b/.test(text) ? 'warning' : undefined;
+function LogView({ text, active, label }: { text: string; active: boolean; label: string }) {
+  const viewer = useRef<VirtuosoHandle>(null);
+  const [following, setFollowing] = useState(true);
+  const [search, setSearch] = useState('');
+  const lines = text ? text.replace(/\n$/, '').split('\n') : [];
+  const visible = search ? lines.filter((line) => Anser.ansiToText(line).toLocaleLowerCase().includes(search.toLocaleLowerCase())) : lines;
+  return <div data-output={active || undefined} role="log" aria-label={label} aria-live="off" className="ufi:flex ufi:h-96 ufi:min-w-0 ufi:flex-col ufi:gap-2">
+    <div className="ufi:flex ufi:items-center ufi:gap-2">
+      <Input type="search" aria-label="搜索日志" placeholder="搜索日志" value={search} onChange={(event) => setSearch(event.target.value)} className="ufi:min-w-0 ufi:flex-1" />
+      <span className="ufi:shrink-0 ufi:text-xs ufi:opacity-65">{visible.length} 行</span>
+    </div>
+    {!following && <Button onClick={() => viewer.current?.scrollToIndex({ index: 'LAST', align: 'end' })}>跟随最新</Button>}
+    <div className="ufi:min-h-0 ufi:flex-1 ufi:overflow-hidden ufi:rounded-xl ufi:bg-black/25 ufi:font-mono ufi:text-xs ufi:leading-relaxed ufi:select-text">
+      {visible.length ? <Virtuoso ref={viewer} data={visible} followOutput="auto" atBottomStateChange={setFollowing} atBottomThreshold={24}
+        initialTopMostItemIndex={visible.length - 1} increaseViewportBy={150}
+        itemContent={(index, line) => <div className="ufi:flex ufi:gap-3 ufi:px-3 ufi:py-0.5">
+          <span aria-hidden className="ufi:w-9 ufi:shrink-0 ufi:text-right ufi:opacity-35">{index + 1}</span>
+          <span data-log-level={/\blevel="?error\b|失败|已被占用/i.test(line) ? 'error' : /\blevel="?warn(?:ing)?\b/i.test(line) ? 'warning' : undefined}
+            className="ufi:min-w-0 ufi:flex-1 ufi:whitespace-pre-wrap ufi:wrap-anywhere ufi:data-[log-level=error]:text-[#ff6961] ufi:data-[log-level=warning]:text-[#ffd60a]">
+            {Anser.ansiToJson(line, { remove_empty: true }).map((part, partIndex) => <span key={partIndex}
+              style={{ color: part.fg ? `rgb(${part.fg})` : undefined, backgroundColor: part.bg ? `rgb(${part.bg})` : undefined }}
+              className={part.decorations.includes('bold') ? 'ufi:font-bold' : undefined}>{part.content}</span>)}
+          </span>
+        </div>} /> : <p className="ufi:p-3 ufi:opacity-60">{search ? '没有匹配的日志' : '暂无日志'}</p>}
+    </div>
+  </div>;
 }

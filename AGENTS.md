@@ -13,6 +13,7 @@
 - 共享 Module：internal/manager 管请求校验、持久任务、订阅、下载校验、配置事务与回滚。CLI 与解密后的 UFI 请求都调用 Submit；不能依赖浏览器串联关键步骤。设备操作统一使用顶层命令，默认等待完成，--no-wait 仅用于显式后台调用；UFI 自启调用 start --no-wait。
 - 平台 Module：internal/platform 管 UFI 守护 / 网络桥接及 systemd 运行时。Adapter 配置由数据库持久化，worker、supervise 和自启任务都重新读取；已有安装不能通过环境或旗标换平台。
 - 存储 Module：internal/storage 使用 sqlc + database/sql + modernc SQLite，拥有类型化状态表；YAML、日志和运行文件留在文件系统。fsutil、host、download、redact 是共享基础实现。
+- 日志：UFI 运行输出与共享 worker 任务记录按来源读取；`log-read` 使用文件身份、偏移和边界摘要识别轮换，只返回完整脱敏行。前端用 React Virtuoso 展示有界累计记录，滚动跟随不控制数据收集，不把内核运行输出重复拼入实时任务详情。
 - 前端：ui/src/transport/ufi 只处理 UFI 通信和引导；gateway.ts 处理任务观察与展示；use-gateway.ts 管草稿和交互；components/ 管视图。CSS 仅留主题与宿主隔离，其余用 Tailwind className。
 - 无样式交互组件统一使用 Base UI。Tailwind 4 使用官方 Vite 插件、ufi: 前缀和容器内的无 layer utilities；不加载 preflight，避免宿主样式覆盖插件或插件样式外溢。
 - 修改加载协议时核对下方 UFI 官方来源；没有文档保证的行为不能从其他插件推断。

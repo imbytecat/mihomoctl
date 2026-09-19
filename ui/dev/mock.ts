@@ -80,11 +80,15 @@ const commands: string[] = [],
   intents: Intent[] = [],
   requests: string[] = [];
 const uploads: { name: string; bytes: Uint8Array }[] = [];
+const logSnapshots = new Map<string, string>();
 const keys = sodium.ready.then(() => sodium.crypto_box_keypair());
 const flags = globalThis as typeof globalThis & {
   mockProbeError?: boolean;
   mockSecretFailure?: boolean;
   mockRuntimeLog?: string;
+  mockSupervisorLog?: string;
+  mockTasksLog?: string;
+  mockLogFailure?: boolean;
   mockUpdateFailure?: boolean;
   mockUploadFailure?: boolean;
   mockUploadDelayMs?: number;
@@ -378,9 +382,18 @@ Object.assign(globalThis, {
           case 'job-log':
             result = '设备任务日志';
             break;
-          case 'logs':
-            result = flags.mockRuntimeLog ?? 'core.log\n代理运行正常';
+          case 'log-read': {
+            if (flags.mockLogFailure) throw new Error('模拟日志读取失败');
+            const text = (args[2] === 'core' ? flags.mockRuntimeLog ?? '代理运行正常'
+              : args[2] === 'supervisor' ? flags.mockSupervisorLog ?? '守护进程正常'
+              : flags.mockTasksLog ?? '').replace(/\n?$/, '\n');
+            const previous = logSnapshots.get(args[3]!) || '';
+            const cursor = String(logSnapshots.size + 1);
+            logSnapshots.set(cursor, text);
+            result = { text: text.startsWith(previous) ? text.slice(previous.length) : text,
+              cursor, reset: !!previous && !text.startsWith(previous), skipped: false };
             break;
+          }
           case 'diagnose':
             result = 'wlan0 192.168.0.1/24';
             break;

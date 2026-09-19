@@ -104,6 +104,21 @@ test('sealed browser intents run in a detached native worker; failed updates pre
     ).toBe('succeeded');
     expect((await inspect()).settings.interfaces).toEqual(['wlan0']);
     expect((await inspect()).settings.releaseProxy).toBe('https://forward.example.com');
+    const taskLog = await cli('log-read', 'tasks');
+    expect(taskLog.text).toContain('action=save-interfaces');
+    expect(taskLog.text).toContain('任务已完成');
+    expect((await cli('log-read', 'tasks', taskLog.cursor)).text).toBe('');
+    await writeFile(join(root, 'runtime/core.log'), 'secret: fixture-log-secret\nsafe core line\n');
+    const coreLog = await cli('log-read', 'core');
+    expect(coreLog.text).toContain('safe core line');
+    expect(coreLog.text).not.toContain('fixture-log-secret');
+    expect(coreLog.text).not.toContain('save-interfaces');
+    await expect(cli('log-read', '../mihomoctl.db')).rejects.toThrow();
+    await rm(join(root, 'runtime/tasks.log'));
+    await mkdir(join(root, 'runtime/tasks.log'));
+    expect((await submit('save-interfaces', { interfaces: 'wlan0' })).state).toBe('failed');
+    await rm(join(root, 'runtime/tasks.log'), { recursive: true });
+    expect((await submit('save-interfaces', { interfaces: 'wlan0' })).state).toBe('succeeded');
     // Fake only mihomo validation; real Go performs HTTP, YAML, storage and job lifecycle.
     await writeFile(
       join(root, 'runtime/mihomo'),

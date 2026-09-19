@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import PQueue from 'p-queue';
 import { toast } from 'sonner';
+import { useLogs } from './use-logs';
 import { subscriptionURL, interfaces, releaseProxy, controllerSettings } from './config';
 import {
   bootstrapAgent,
@@ -10,7 +11,7 @@ import {
   uninstallAgent,
   cancelDeviceTask,
   checkUpdates,
-  deviceLogs,
+  diagnoseDevice,
   readDeviceState,
   submitTask,
   readControllerSecret,
@@ -67,6 +68,8 @@ export function useGateway() {
   const controllerVersion = useRef('');
   const [controllerError, setControllerError] = useState('');
   const open = useRef(false);
+  const logs = useLogs(!!device?.agent, open);
+  const [logSource, setLogSource] = useState<'core' | 'manager' | 'details'>('core');
   const [detail, setDetail] = useState('');
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailTitle, setDetailTitle] = useState('操作详情');
@@ -82,6 +85,7 @@ export function useGateway() {
     detailRequest.current++;
     setDetailTitle('任务详情');
     setDetail(describeTask(task));
+    setLogSource('core');
     setDetailOpen(true);
   };
   const observe = (task: DeviceJob) => {
@@ -218,6 +222,7 @@ export function useGateway() {
     if (!task) return;
     const revision = ++detailRequest.current;
     setDetailTitle('任务详情');
+    setLogSource('details');
     setDetail(describeTask(task));
     setDetailOpen(true);
     try {
@@ -233,22 +238,8 @@ export function useGateway() {
   const refreshDetail = async (accept = () => true) => {
     const revision = detailRequest.current;
     const task = deviceRef.current?.task || observedTask;
-    const text = detailTitle === '任务详情' && task ? await taskDetails(task)
-      : detailTitle === '运行日志' ? await deviceLogs() : null;
+    const text = detailTitle === '任务详情' && task ? await taskDetails(task) : null;
     if (text !== null && revision === detailRequest.current && accept()) setDetail(text);
-  };
-
-  const showRuntimeLogs = async () => {
-    const revision = ++detailRequest.current;
-    setDetailTitle('运行日志');
-    setDetail('正在读取运行日志…');
-    setDetailOpen(true);
-    try {
-      const text = await deviceLogs();
-      if (revision === detailRequest.current) setDetail(text || '暂无运行日志');
-    } catch (error) {
-      if (revision === detailRequest.current) setDetail(error instanceof Error ? error.message : String(error));
-    }
   };
 
   function dirty() {
@@ -334,6 +325,7 @@ export function useGateway() {
   };
 
   const perform = async (id: Operation, quiet = false) => {
+    if (id === 'logs') { setLogSource('core'); setDetailOpen(true); return; }
     const snapshot = form.getValues();
     if (
       busyRef.current ||
@@ -344,7 +336,7 @@ export function useGateway() {
     busyRef.current = true;
     setBusy(id);
     setError(false);
-    if (!['任务详情', '运行日志'].includes(detailTitleRef.current)) setDetailTitle('操作详情');
+    if (detailTitleRef.current !== '任务详情') setDetailTitle('操作详情');
     let failed = false;
     if (!quiet && !installationTask(id) && !['start', 'restart'].includes(id))
       toast.loading('正在处理…', notification);
@@ -470,10 +462,7 @@ export function useGateway() {
             setSaved(savedRef.current);
             break;
           case 'diagnose':
-            result = await deviceLogs(true);
-            break;
-          case 'logs':
-            result = await deviceLogs();
+            result = await diagnoseDevice();
             break;
           case 'refresh':
             result = '状态已刷新';
@@ -481,22 +470,22 @@ export function useGateway() {
           default:
             result = await waitTask(await submitTask(id), observe);
         }
-        if (!quiet && id !== 'refresh' && !['任务详情', '运行日志'].includes(detailTitleRef.current)) setDetail(result);
-        if (id === 'logs' || id === 'diagnose') {
+        if (!quiet && id !== 'refresh' && detailTitleRef.current !== '任务详情') setDetail(result);
+        if (id === 'diagnose') {
           detailRequest.current++;
           setDetail(result);
-          setDetailTitle(id === 'logs' ? '运行日志' : '网络诊断');
+          setDetailTitle('网络诊断');
+          setLogSource('details');
           setDetailOpen(true);
         }
         if (!quiet && !installationTask(id))
           toast.success(
-            id === 'logs'
-              ? '日志已加载'
-              : id === 'diagnose'
+            id === 'diagnose'
                 ? '诊断完成'
                 : result.split('\n')[0]!.slice(0, 180),
             notification,
           );
+        if (!quiet && result) logs.record(result);
       });
     } catch (error) {
       if (error instanceof TaskCancelled) {
@@ -508,8 +497,10 @@ export function useGateway() {
       detailRequest.current++;
       setDetailTitle(error instanceof TaskFailed ? '任务详情' : '操作详情');
       const text = error instanceof Error ? error.message : String(error);
+      logs.record(text);
       setError(true);
       setDetail(text);
+      setLogSource('details');
       setDetailOpen(true);
       if (!quiet)
         toast.error(text.split('\n')[0]!.slice(0, 160), {
@@ -636,6 +627,9 @@ export function useGateway() {
     perform,
     openDashboard,
     open,
+    logs,
+    logSource,
+    setLogSource,
     detail,
     detailTitle,
     detailOpen,
@@ -643,7 +637,6 @@ export function useGateway() {
     error,
     showTask,
     refreshDetail,
-    showRuntimeLogs,
     secret,
     setSecret,
   };

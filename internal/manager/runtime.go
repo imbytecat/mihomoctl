@@ -71,14 +71,20 @@ func (a *Manager) setBoot(enabled bool) error {
 	return a.Platform.SetBoot(context.Background(), enabled)
 }
 func (a *Manager) Logs() (string, error) {
+	var result strings.Builder
+	names := []string{"tasks.log"}
 	if journal, ok := a.Platform.(interface {
 		Journal(context.Context) (string, error)
 	}); ok {
 		text, err := journal.Journal(context.Background())
-		return redact.String(text), err
+		if err != nil {
+			return "", err
+		}
+		result.WriteString(redact.String(text) + "\n")
+	} else {
+		names = append(names, "supervisor.log", "core.log")
 	}
-	var result strings.Builder
-	for _, name := range []string{"supervisor.log", "core.log"} {
+	for _, name := range names {
 		if data, err := fsutil.ReadTail(a.runtime(name), 24*1024); err == nil {
 			result.WriteString(name + "\n" + redact.String(string(data)) + "\n")
 		}
@@ -90,4 +96,17 @@ func (a *Manager) Diagnose() (string, error) {
 	defer cancel()
 	text, err := a.Platform.Diagnostics(ctx)
 	return redact.String(text), err
+}
+
+func (a *Manager) ReadLog(source, cursor string) (fsutil.LogChunk, error) {
+	name := map[string]string{"core": "core.log", "supervisor": "supervisor.log", "tasks": "tasks.log"}[source]
+	if name == "" {
+		return fsutil.LogChunk{}, errors.New("未知日志来源")
+	}
+	if a.Platform.Config().Kind != platform.UFI && source != "tasks" {
+		return fsutil.LogChunk{}, errors.New("Linux 运行日志请使用 logs 或 journalctl")
+	}
+	chunk, err := fsutil.ReadLog(a.runtime(name), cursor)
+	chunk.Text = redact.String(chunk.Text)
+	return chunk, err
 }

@@ -250,9 +250,14 @@ export async function jobLog(job: DeviceJob) {
   const result = await agent(['job-log', job.id]);
   return typeof result === 'string' ? result : '';
 }
-export async function deviceLogs(diagnose = false) {
-  const result = await agent([diagnose ? 'diagnose' : 'logs']);
+export async function diagnoseDevice() {
+  const result = await agent(['diagnose']);
   return typeof result === 'string' ? result : '';
+}
+
+export async function readLog(source: 'core' | 'supervisor' | 'tasks', cursor: string) {
+  return z.object({ text: z.string(), cursor: z.string(), reset: z.boolean(), skipped: z.boolean() })
+    .parse(await agent(['log-read', source, cursor]));
 }
 
 export async function readControllerSecret(overrides = false) {

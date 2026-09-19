@@ -137,7 +137,7 @@ test('controller transactions, encrypted secrets and task details', async () => 
     .toBeVisible();
   await expect
     .element(app.getByCSS('[data-log-source]'))
-    .toHaveTextContent('运行日志');
+    .toHaveTextContent('Mihomo');
   await closeModal();
   await app.getByRole('button', { name: '更多操作', exact: true }).click();
   await app.getByRole('menuitem', { name: '最近任务', exact: true }).click();

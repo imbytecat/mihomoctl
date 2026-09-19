@@ -4,7 +4,6 @@ import {
   readBootstrap,
   readUninstallJob,
   jobLog,
-  deviceLogs,
 } from './transport/ufi';
 import type { DeviceJob } from './state';
 
@@ -120,14 +119,8 @@ export async function taskDetails(task: DeviceJob) {
 }
 
 async function formatTaskDetails(task: DeviceJob) {
-  const activeRuntime = ['queued', 'running'].includes(task.state) &&
-    ['start', 'restart', 'stop', 'update', 'save-controller'].includes(task.action);
-  const [log, runtime] = await Promise.all([
-    jobLog(task).catch(() => '暂时无法读取任务日志'),
-    activeRuntime ? deviceLogs().catch(() => '暂时无法读取运行日志') : '',
-  ]);
-  return [describeTask(task), log && '任务日志\n' + log,
-    runtime && '运行日志（最近输出）\n' + runtime].filter(Boolean).join('\n\n');
+  const log = await jobLog(task).catch(() => '暂时无法读取任务日志');
+  return [describeTask(task), log && '任务日志\n' + log].filter(Boolean).join('\n\n');
 }
 
 export function dashboardURL(base: string, port: number, secret: string) {

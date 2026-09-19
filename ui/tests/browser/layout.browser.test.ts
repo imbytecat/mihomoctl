@@ -40,7 +40,7 @@ for (const width of [360, 1280]) {
     const bounds = dialog.element().getBoundingClientRect();
     expect(bounds).not.toBeNull();
     expect(bounds!.x).toBeGreaterThanOrEqual(0);
-    expect(app.getByCSS('[data-output]').element().getBoundingClientRect().height).toBeLessThanOrEqual(320);
+    expect(app.getByCSS('[data-output]').element().getBoundingClientRect().height).toBeLessThanOrEqual(384);
     expect(bounds!.width).toBeLessThanOrEqual(width - 32);
     await app.getByRole('button', { name: '关闭详情', exact: true }).click();
     await expect.element(dialog).not.toBeVisible();

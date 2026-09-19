@@ -116,6 +116,13 @@ func New(version string) *cobra.Command {
 			return m.ControllerSecret(args[0])
 		}},
 		{"logs", "Print sanitized runtime logs", cobra.NoArgs, false, func(_ *cobra.Command, m *manager.Manager, _ []string) (any, error) { return m.Logs() }},
+		{"log-read SOURCE [CURSOR]", "Read new sanitized log lines (core, supervisor, tasks)", cobra.RangeArgs(1, 2), false, func(_ *cobra.Command, m *manager.Manager, args []string) (any, error) {
+			cursor := ""
+			if len(args) == 2 {
+				cursor = args[1]
+			}
+			return m.ReadLog(args[0], cursor)
+		}},
 		{"diagnose", "Print network diagnostics", cobra.NoArgs, false, func(_ *cobra.Command, m *manager.Manager, _ []string) (any, error) { return m.Diagnose() }},
 		{"worker ID", "Execute an accepted task with inherited descriptors", cobra.ExactArgs(1), true, func(_ *cobra.Command, m *manager.Manager, args []string) (any, error) { return nil, m.Worker(args[0]) }},
 		{"supervise", "Run the UFI runtime supervisor", cobra.NoArgs, true, func(_ *cobra.Command, m *manager.Manager, _ []string) (any, error) { return nil, m.Supervise() }},

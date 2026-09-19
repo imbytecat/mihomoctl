@@ -31,7 +31,7 @@ sudo ./mihomoctl-linux-amd64 --root /opt/mihomoctl install \
 
 ## 监听与面板
 
-默认只监听 `127.0.0.1`。LAN 地址必须实际存在于本机接口；地址绑定不等于入口隔离。转发、TPROXY、DNS 接管、IPv6 和故障策略仍需配置系统网络和防火墙，mihomoctl 不会自动部署这些规则，也不会显示“已接管网络”。`diagnose` 使用系统 `ip` 命令读取网络信息，`logs` 通过 `journalctl` 读取 service 日志。
+默认只监听 `127.0.0.1`。LAN 地址必须实际存在于本机接口；地址绑定不等于入口隔离。转发、TPROXY、DNS 接管、IPv6 和故障策略仍需配置系统网络和防火墙，mihomoctl 不会自动部署这些规则，也不会显示“已接管网络”。`diagnose` 使用系统 `ip` 命令读取网络信息，`logs` 汇总 `journalctl` 的 service 日志与 `runtime/tasks.log` 的任务记录。
 
 管理 API 固定绑定本机回环地址。需要 Zashboard 时执行 `download-dashboard`，通过 SSH 转发访问：
 
