@@ -9,7 +9,7 @@ export type TaskParams = {
   releaseProxy?: string;
   url?: string;
   interfaces?: string;
-  controller?: {
+  controller?: { yaml: string } | {
     enabled: boolean;
     port: number;
     secret?: string;
@@ -99,6 +99,7 @@ const stateSchema = z.object({
       enabled: z.boolean(),
       port: z.number().int().min(1024).max(65535),
       applied: z.boolean(),
+      overrides: z.boolean().default(false),
     })
     .nullable(),
   dashboard: z.object({
@@ -208,7 +209,10 @@ export function disabledReason(
     return state.agent ? '' : '请先安装 mihomoctl';
   if (action === 'logs' || action === 'diagnose')
     return state.agent ? '' : '请先安装 mihomoctl';
-  if (state.locked) return '设备正在安装或更新，请等待完成后刷新';
+  if (state.locked && action !== 'open-dashboard')
+    return state.task && ['queued', 'running'].includes(state.task.state)
+      ? '设备正在执行任务，请查看任务进度'
+      : '控制锁尚未释放，请查看最近任务和运行日志';
   if (action === 'save-interfaces' && !state.capabilities.interfaces)
     return '由系统网络配置管理';
   if (action === 'uninstall') return state.agent ? '' : 'Mihomo 服务未安装';

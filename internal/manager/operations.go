@@ -66,6 +66,21 @@ func (a *Manager) installRuntime() error {
 	if err := a.Platform.Prepare(); err != nil {
 		return err
 	}
+	if data, err := a.overrides(); err != nil {
+		return err
+	} else if len(data) == 0 {
+		control, err := a.controller()
+		if err != nil {
+			return err
+		}
+		defaults, err := a.defaultOverrides(control)
+		if err != nil {
+			return err
+		}
+		if err := fsutil.AtomicWrite(a.runtime("overrides.yaml"), defaults, 0600); err != nil {
+			return err
+		}
+	}
 	return a.store.SetInstalled()
 }
 
@@ -316,9 +331,28 @@ func (a *Manager) updateConfig(ctx context.Context, request Request, work string
 }
 
 func (a *Manager) applyConfig(ctx context.Context, id string, source []byte, address string, control Controller, phase func(string)) error {
+	overrides, err := a.overrides()
+	if err != nil {
+		return err
+	}
+	return a.applyConfigWithOverrides(ctx, id, source, address, control, overrides, phase)
+}
+
+func (a *Manager) applyConfigWithOverrides(ctx context.Context, id string, source []byte, address string, control Controller, overrides []byte, phase func(string)) error {
 	phase("adapt")
+	overlay, err := overrideMapping(overrides)
+	if err != nil {
+		return err
+	}
+	if err := a.validateManagedOverrides(overlay); err != nil {
+		return err
+	}
+	merged, err := mergeOverrides(source, overlay)
+	if err != nil {
+		return err
+	}
 	dashboard := a.dashboard().Installed
-	config, ports, err := adaptConfig(source, control, dashboard, a.Platform.Policy())
+	config, ports, err := adaptConfig(merged, control, dashboard, a.Platform.Policy())
 	if err != nil {
 		return err
 	}
@@ -328,6 +362,9 @@ func (a *Manager) applyConfig(ctx context.Context, id string, source []byte, add
 		return err
 	}
 	if err = fsutil.AtomicWrite(filepath.Join(generation, "source.yaml"), source, 0600); err != nil {
+		return err
+	}
+	if err = fsutil.AtomicWrite(filepath.Join(generation, "overrides.yaml"), overrides, 0600); err != nil {
 		return err
 	}
 	if err = fsutil.AtomicWrite(filepath.Join(generation, "ports"), []byte(ports), 0600); err != nil {

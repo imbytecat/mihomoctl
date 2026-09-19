@@ -12,7 +12,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { clsx } from 'clsx';
-import { disabledReason } from '../state';
+import { disabledReason, topTask } from '../state';
 import { dashboardURL } from '../gateway';
 import type { GatewayModel, Operation } from '../use-gateway';
 import { ActionButton, Button, Hint, buttonStyle } from './ui';
@@ -35,6 +35,7 @@ export function stageOf(model: GatewayModel) {
 export function runtimeTitle(model: GatewayModel) {
   const device = model.device;
   if (!device) return model.busy === 'uninstall' ? '正在卸载' : model.busy ? '正在检测' : '状态不可用';
+  if (!device.running && device.capture) return '待清理';
   if (!device.running)
     return stageOf(model) === 'ready' ? '已停止' : '尚未就绪';
   return !device.supervisor
@@ -165,7 +166,7 @@ export function Overview({
         <ActionButton
           model={model}
           action={device?.running || device?.capture ? 'stop' : 'start'}
-          label={device?.running || device?.capture ? '停止代理' : '启动代理'}
+          label={device?.running ? '停止代理' : device?.capture ? '清理残留规则' : '启动代理'}
           icon={device?.running || device?.capture ? Square : Play}
           primary
         />
@@ -203,6 +204,7 @@ export function Overview({
           <Hint>卸载不依赖状态读取；完成后可重新初始化安装。</Hint>
         </div>
       )}
+      {device?.locked && !topTask(device.task) && <Hint error>控制锁尚未释放，请查看最近任务和运行日志。</Hint>}
       {device?.service && (
         <div className="ufi:mt-3">
           {dashboardReason ? (

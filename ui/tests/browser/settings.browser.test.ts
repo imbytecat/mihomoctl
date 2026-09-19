@@ -2,6 +2,8 @@ import { expect, test } from 'vitest';
 import { userEvent } from 'vitest/browser';
 import { app, evaluate, idle, closeModal, open, reload } from './app';
 
+const panelYaml = (port: number, extra = '') => `external-controller: 0.0.0.0:${port}\n${extra}`;
+
 test('unsaved drafts cancel navigation with the current browser event API', async () => {
   await open('ready');
   const canLeave = () => evaluate('window.dispatchEvent(new Event("beforeunload", { cancelable: true }))');
@@ -9,11 +11,12 @@ test('unsaved drafts cancel navigation with the current browser event API', asyn
   await app.getByCSS('[data-url]').fill('https://draft.example/subscription');
   expect(canLeave()).toBe(false);
   await app.getByRole('tab', { name: '设置', exact: true }).click();
-  await app.getByCSS('#ufi-control-port').fill('9191');
+  const initialYaml = (app.getByCSS('#ufi-controller-yaml').element() as HTMLTextAreaElement).value;
+  await app.getByCSS('#ufi-controller-yaml').fill(panelYaml(9191));
   await app.getByRole('tab', { name: '日志', exact: true }).click();
   await app.getByRole('tab', { name: '设置', exact: true }).click();
-  await expect.element(app.getByCSS('#ufi-control-port')).toHaveValue('9191');
-  await app.getByCSS('#ufi-control-port').fill('9090');
+  await expect.element(app.getByCSS('#ufi-controller-yaml')).toHaveValue(panelYaml(9191));
+  await app.getByCSS('#ufi-controller-yaml').fill(initialYaml);
   await app.getByRole('tab', { name: '概览', exact: true }).click();
   await expect.element(app.getByCSS('[data-url]')).toHaveValue('https://draft.example/subscription');
   await app.getByCSS('[data-url]').fill('');
@@ -64,17 +67,16 @@ test('interface autosave preserves newer drafts and handles failures', async () 
 test('controller transactions, encrypted secrets and task details', async () => {
   await open('running');
   await app.getByRole('tab', { name: '设置', exact: true }).click();
-  await app.getByCSS('#ufi-control-port').fill('07894');
+  await app.getByCSS('#ufi-controller-yaml').fill('external-controller: [\n');
   await app.getByCSS('[data-action=save-controller]').click();
   await idle();
   await app.getByRole('tab', { name: '设置', exact: true }).click();
-  await expect.element(app.getByCSS('#ufi-port-error')).toBeVisible();
+  await expect.element(app.getByCSS('#ufi-controller-yaml-error')).toBeVisible();
   expect(evaluate('mockIntents.length')).toBe(0);
   await expect
     .element(app.getByCSS('[data-dashboard-link]'))
     .toHaveAttribute('href', expect.stringContaining(':9090/ui/'));
-  await app.getByCSS('#ufi-control-port').fill('9191');
-  await app.getByCSS('#ufi-control-secret').fill('short');
+  await app.getByCSS('#ufi-controller-yaml').fill(panelYaml(9191, 'secret: short\n'));
   await evaluate('window.mockTaskDelayMs = 5000');
   await app.getByCSS('[data-action=save-controller]').click();
   await expect.poll(() => evaluate('mockDeviceState.locked')).toBeTruthy();
@@ -82,6 +84,7 @@ test('controller transactions, encrypted secrets and task details', async () => 
     .element(app.getByCSS('[data-status]'))
     .toHaveTextContent('运行中');
   expect(evaluate('mockDeviceState.controller.port')).toBe(9090);
+  await app.getByCSS('#ufi-controller-yaml').fill(panelYaml(9393, 'secret: newer-draft-secret\n'));
   await expect
     .poll(() => evaluate('mockDeviceState.controller.port === 9191'))
     .toBeTruthy();
@@ -92,6 +95,7 @@ test('controller transactions, encrypted secrets and task details', async () => 
   await expect
     .element(app.getByCSS('[data-dashboard-link]'))
     .not.toHaveAttribute('href', expect.stringContaining('secret'));
+  await expect.element(app.getByCSS('#ufi-controller-yaml')).toHaveValue(panelYaml(9393, 'secret: newer-draft-secret\n'));
   await app.getByRole('button', { name: '查看当前密钥', exact: true }).click();
   await expect
     .element(app.getByCSS('[data-dialog=secret][data-state=open]'))
@@ -124,7 +128,7 @@ test('controller transactions, encrypted secrets and task details', async () => 
     .toHaveTextContent('任务详情');
   await expect
     .element(app.getByCSS('[data-output]'))
-    .toMatchTextContent('面板设置');
+    .toMatchTextContent('覆写');
   await expect
     .element(app.getByCSS('[data-output]'))
     .not.toMatchTextContent('core.log');
@@ -132,14 +136,14 @@ test('controller transactions, encrypted secrets and task details', async () => 
   await evaluate(
     'window.mockTaskDelayMs = 300; window.mockTaskFailure = "配置校验失败"',
   );
-  await app.getByCSS('#ufi-control-port').fill('9292');
+  await app.getByCSS('#ufi-controller-yaml').fill(panelYaml(9292));
   await app.getByCSS('[data-action=save-controller]').click();
   await expect
     .poll(() => evaluate('mockDeviceState.task.state === "failed"'))
     .toBeTruthy();
   await idle();
   expect(evaluate('mockDeviceState.controller.port')).toBe(9191);
-  await expect.element(app.getByCSS('#ufi-control-port')).toHaveValue('9292');
+  await expect.element(app.getByCSS('#ufi-controller-yaml')).toHaveValue(panelYaml(9292));
 });
 
 test('update checks show component results without submitting mutations or clearing drafts', async () => {
@@ -225,4 +229,37 @@ test('install after checking updates immediately disables redundant component up
   await expect.element(app.getByCSS('[data-group=maintenance] [data-action=download]')).toBeDisabled();
   await expect.element(app.getByCSS('[data-group=maintenance] [data-action=download-dashboard]')).toBeDisabled();
   expect(evaluate('mockCommands.some(c => c.includes("check-updates"))')).toBe(false);
+});
+
+test('override editor preserves newer drafts and creates a secret without exposing it in shell requests', async () => {
+  await open('ready');
+  await app.getByRole('tab', { name: '设置', exact: true }).click();
+  const editor = app.getByCSS('#ufi-controller-yaml');
+  const original = (editor.element() as HTMLTextAreaElement).value;
+  await evaluate('mockTaskDelayMs = 2500');
+  await editor.fill(panelYaml(9191, 'future-option: true\n'));
+  await app.getByCSS('[data-action=save-controller]').click();
+  await expect.poll(() => evaluate('mockDeviceState.locked')).toBe(true);
+  await editor.fill(original);
+  await idle();
+  expect(evaluate('mockDeviceState.controller.port')).toBe(9191);
+  await expect.element(editor).toHaveValue(original);
+  expect(evaluate('window.dispatchEvent(new Event("beforeunload", { cancelable: true }))')).toBe(false);
+  await editor.fill(panelYaml(9191, 'future-option: true\n'));
+  await app.getByRole('button', { name: '生成新密钥', exact: true }).click();
+  const draft = (editor.element() as HTMLTextAreaElement).value;
+  expect(draft).toContain('future-option: true');
+  const secret = draft.match(/secret: ([a-f0-9]{64})/)![1]!;
+  await app.getByCSS('[data-action=save-controller]').click();
+  await idle();
+  expect(evaluate(`mockCommands.every(c => !c.includes(${JSON.stringify(secret)}))`)).toBe(true);
+  await app.getByRole('button', { name: '查看当前密钥', exact: true }).click();
+  await expect.element(app.getByCSS('[data-dialog=secret] input')).toHaveValue(secret);
+  await closeModal('关闭密钥');
+  await editor.fill('');
+  await app.getByCSS('[data-action=save-controller]').click();
+  await idle();
+  await expect.element(editor).toHaveValue(expect.stringContaining('external-controller:'));
+  await expect.element(editor).toHaveValue(expect.stringContaining(secret));
+  await expect.element(editor).not.toHaveValue(expect.stringContaining('future-option'));
 });

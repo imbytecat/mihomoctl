@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -301,6 +302,12 @@ func (a *UFIAdapter) Start(ctx context.Context, options StartOptions) error {
 }
 
 func (a *UFIAdapter) Supervise() error {
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer cancel()
+	return a.supervise(ctx)
+}
+
+func (a *UFIAdapter) supervise(ctx context.Context) error {
 	lock, err := os.OpenFile(a.runtime("supervisor.lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return err
@@ -313,25 +320,57 @@ func (a *UFIAdapter) Supervise() error {
 		return err
 	}
 	defer os.Remove(a.runtime("supervisor.json"))
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
-	defer cancel()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	logger.Info("UFI 守护已启动", "pid", os.Getpid())
 	delay := time.Second
+	retry := func() bool {
+		logger.Info("等待重新启动内核", "delay", delay)
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(delay):
+		}
+		delay = min(delay*2, 30*time.Second)
+		return true
+	}
+	cleanup := func() error {
+		err := a.network(context.Background(), "stop")
+		if err != nil {
+			logger.Error("网络规则清理失败，保留清理记录", "error", redact.String(err.Error()))
+		}
+		return err
+	}
 	for ctx.Err() == nil {
+		if info, err := os.Stat(a.runtime("supervisor.log")); err == nil && info.Size() > 256<<10 {
+			_ = os.Truncate(a.runtime("supervisor.log"), 0)
+		}
 		// Protect listeners even before the hotspot exists; no core starts unguarded.
 		if err := a.network(ctx, "prepare"); err != nil {
-			return err
+			logger.Error("网络保护准备失败，内核未启动", "error", redact.String(err.Error()))
+			cleanupErr := cleanup()
+			if !retry() {
+				return cleanupErr
+			}
+			continue
 		}
 		log, err := os.OpenFile(a.runtime("core.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 		if err != nil {
 			return err
 		}
-		cmd := exec.Command(a.runtime("mihomo"), "-d", a.runtime(), "-f", a.runtime("current", "config.yaml"))
+		cmd := exec.CommandContext(ctx, a.runtime("mihomo"), "-d", a.runtime(), "-f", a.runtime("current", "config.yaml"))
+		cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+		cmd.WaitDelay = 5 * time.Second
 		cmd.Stdout = log
 		cmd.Stderr = log
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 		if err = cmd.Start(); err != nil {
 			log.Close()
-			return err
+			logger.Error("内核进程启动失败", "error", redact.String(err.Error()))
+			cleanupErr := cleanup()
+			if !retry() {
+				return cleanupErr
+			}
+			continue
 		}
 		err = fsutil.WriteJSON(a.runtime("core.json"), host.Record{PID: cmd.Process.Pid, Start: host.Start(cmd.Process.Pid)})
 		if err == nil {
@@ -341,8 +380,9 @@ func (a *UFIAdapter) Supervise() error {
 			_ = cmd.Process.Kill()
 			_ = cmd.Wait()
 			log.Close()
-			return err
+			return errors.Join(fmt.Errorf("无法记录内核进程：%w", err), cleanup())
 		}
+		logger.Info("Mihomo 内核已启动", "pid", cmd.Process.Pid)
 		done := make(chan error, 1)
 		go func() { done <- cmd.Wait() }()
 		ticker := time.NewTicker(5 * time.Second)
@@ -351,47 +391,40 @@ func (a *UFIAdapter) Supervise() error {
 		for alive {
 			select {
 			case <-ctx.Done():
-				_ = a.stopProcess("core")
-				<-done
-				if err := a.network(context.Background(), "stop"); err != nil {
-					ticker.Stop()
-					log.Close()
-					return err
-				}
+				logger.Info("收到停止请求，等待本次内核退出")
+				<-done // CommandContext sends TERM, then kills only this child after WaitDelay.
 				alive = false
 			case err := <-done:
-				fmt.Println("core exited:", err)
+				logger.Warn("Mihomo 内核退出", "error", err, "uptime", time.Since(started))
 				alive = false
 			case <-ticker.C:
 				e := a.network(ctx, "sync")
-				if e != nil {
-					fmt.Println(e)
+				if e != nil && ctx.Err() == nil {
+					logger.Error("网络同步失败，为保护监听端口终止内核", "error", redact.String(e.Error()))
 					// Unknown guard state must not leave a public proxy listening.
-					_ = cmd.Process.Kill()
+					if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+						logger.Error("终止本次内核失败", "error", err)
+					}
 				}
 				if info, e := log.Stat(); e == nil && info.Size() > 1<<20 {
 					_ = log.Truncate(0)
-				}
-				if info, e := os.Stat(a.runtime("supervisor.log")); e == nil && info.Size() > 256<<10 {
-					_ = os.Truncate(a.runtime("supervisor.log"), 0)
 				}
 			}
 		}
 		ticker.Stop()
 		log.Close()
-		_ = a.network(context.Background(), "stop")
+		cleanupErr := cleanup()
 		_ = os.Remove(a.runtime("core.json"))
 		_ = os.Remove(a.runtime("core.pid"))
 		if time.Since(started) > time.Minute {
 			delay = time.Second
 		}
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-time.After(delay):
+		if ctx.Err() != nil {
+			logger.Info("守护已停止，内核进程已退出", "networkClean", cleanupErr == nil)
+			return cleanupErr
 		}
-		if delay < 30*time.Second {
-			delay *= 2
+		if !retry() {
+			return cleanupErr
 		}
 	}
 	return nil

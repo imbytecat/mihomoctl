@@ -32,3 +32,13 @@ test('failed cleanup preserves the uninstall entry and reports the actual failur
   await closeModal();
   await expect.element(app.getByRole('button', { name: '卸载现有安装', exact: true })).toBeEnabled();
 });
+
+test('remaining network state is shown as pending cleanup, not a clean stop', async () => {
+  await open('running');
+  await evaluate('Object.assign(mockDeviceState, { running: false, supervisor: false, listeners: false, network: false, capture: true })');
+  await expect.element(app.getByCSS('[data-status]')).toHaveTextContent('待清理');
+  await app.getByRole('button', { name: '清理残留规则', exact: true }).click();
+  await idle();
+  await expect.element(app.getByCSS('[data-status]')).toHaveTextContent('已停止');
+  expect(evaluate('mockIntents.at(-1).action')).toBe('stop');
+});

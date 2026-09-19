@@ -1,4 +1,4 @@
-import { Controller } from 'react-hook-form';
+import { withGeneratedSecret } from '../config';
 import { Check } from 'lucide-react';
 import {
   componentVersion,
@@ -9,6 +9,7 @@ import {
 import type { GatewayModel } from '../use-gateway';
 import {
   ActionButton,
+  Button,
   Hint,
   Input,
   Row,
@@ -52,136 +53,35 @@ function RuntimeSettings({ model }: { model: GatewayModel }) {
 }
 
 function PanelSettings({ model }: { model: GatewayModel }) {
-  const { device, form, values, busy } = model;
-  const { errors, dirtyFields } = form.formState;
-  const pending =
-    !!device?.controller &&
-    (values.controlEnabled !== device.controller.enabled ||
-      Number(values.controlPort) !== device.controller.port ||
-      !!values.controlSecret ||
-      values.resetSecret ||
-      (device.config && !device.controller.applied));
+  const { device, form, values } = model;
+  const { errors } = form.formState;
+  const pending = model.controllerDirty || (device?.config && !device.controller?.applied);
   return (
-    <section
-      data-group="controller"
-      hidden={!device?.service}
-      aria-labelledby="ufi-controller-heading"
-    >
-      <h3
-        id="ufi-controller-heading"
-        className="ufi:m-0 ufi:flex ufi:items-center ufi:justify-between ufi:px-4 ufi:pt-5 ufi:pb-2 ufi:text-xs ufi:font-medium ufi:opacity-60"
-      >
-        控制面板
-        <span>
-          {Object.keys(dirtyFields).some(
-            (key) => key.startsWith('control') || key === 'resetSecret',
-          )
-            ? '待应用'
-            : device?.controller?.applied
-              ? '已应用'
-              : '已保存'}
-        </span>
+    <section data-group="controller" hidden={!device?.service} aria-labelledby="ufi-controller-heading">
+      <h3 id="ufi-controller-heading" className="ufi:m-0 ufi:flex ufi:items-center ufi:justify-between ufi:px-4 ufi:pt-5 ufi:pb-2 ufi:text-xs ufi:font-medium ufi:opacity-60">
+        本地覆写
+        <span>{model.controllerDirty ? '待应用' : device?.controller?.applied ? '已应用' : '已保存'}</span>
       </h3>
-      <fieldset
-        hidden={!device?.controller}
-        disabled={!!busy || !device?.controller || device.locked}
-        className="ufi:m-0 ufi:min-w-0 ufi:border-0 ufi:p-0"
-      >
-        <Row>
-          <label htmlFor="ufi-control-enabled">启用控制面板</label>
-          <Controller
-            control={form.control}
-            name="controlEnabled"
-            render={({ field }) => (
-              <Switch
-                id="ufi-control-enabled"
-                checked={field.value}
-                onCheckedChange={field.onChange}
-                onBlur={field.onBlur}
-                ref={field.ref}
-                disabled={!!busy || !!device?.locked}
-              />
-            )}
-          />
-        </Row>
-        <div className="ufi:border-0 ufi:border-t ufi:border-solid ufi:border-[var(--mh-line)] ufi:p-4">
-          <label htmlFor="ufi-control-port" className="ufi:mb-2.5 ufi:block">
-            API 端口
-          </label>
-          <Input
-            id="ufi-control-port"
-            inputMode="numeric"
-            type="text"
-            {...form.register('controlPort', {
-              validate: (value) => model.validate('controlPort', value),
-            })}
-            aria-invalid={!!errors.controlPort}
-            aria-describedby={
-              errors.controlPort?.message ? 'ufi-port-error' : undefined
-            }
-          />
-          <Hint id="ufi-port-error" error>
-            {errors.controlPort?.message}
-          </Hint>
+      <div className="ufi:p-4">
+        <label htmlFor="ufi-controller-yaml" className="ufi:mb-2.5 ufi:block">覆写 YAML</label>
+        <textarea id="ufi-controller-yaml" rows={9} maxLength={20480} spellCheck={false} autoComplete="off" autoCapitalize="off"
+          disabled={!model.controllerLoaded || !device?.controller?.overrides}
+          className={`ufi:block ufi:w-full ufi:min-w-0 ufi:m-0 ufi:resize-y ufi:rounded-xl ufi:border ufi:border-solid ufi:border-[var(--mh-line)] ufi:bg-none ufi:bg-white/5 ufi:p-3 ufi:font-mono ufi:text-base ufi:text-inherit ufi:leading-relaxed ufi:disabled:opacity-40 ${focus}`}
+          {...form.register('controllerYaml', { validate: (value) => model.validate('controllerYaml', value), onChange: () => { if (form.getFieldState('controllerYaml').error) void form.trigger('controllerYaml'); } })}
+          aria-invalid={!!errors.controllerYaml} aria-describedby="ufi-controller-yaml-help ufi-controller-yaml-error" />
+        <Hint id="ufi-controller-yaml-error" error>{errors.controllerYaml?.message}</Hint>
+        <Hint error>{device?.controller && !device.controller.overrides ? '请先更新 mihomoctl 以使用通用覆写' : model.controllerError}</Hint>
+        <Hint id="ufi-controller-yaml-help">使用 Mihomo 配置字段；映射递归合并，数组整体替换。清空保存会填入基础管理设置，密钥保持不变。TPROXY、DNS 监听及平台绑定由管理器维护。</Hint>
+        <div className="ufi:mt-3 ufi:flex ufi:flex-wrap ufi:gap-2">
+          <ActionButton model={model} action="save-controller" label="保存并应用" icon={Check} primary extraReason={!model.controllerLoaded || !device?.controller?.overrides ? '请先读取设备覆写' : pending ? '' : '设置未改变'} />
+          <Button disabled={!model.controllerLoaded} onClick={() => {
+            try { form.setValue('controllerYaml', withGeneratedSecret(values.controllerYaml), { shouldDirty: true, shouldValidate: true }); }
+            catch { form.setError('controllerYaml', { message: '请先修正 YAML 格式后再生成密钥' }); }
+          }}>生成新密钥</Button>
+          <ActionButton model={model} action="view-secret" label="查看当前密钥" />
         </div>
-        <div className="ufi:border-0 ufi:border-t ufi:border-solid ufi:border-[var(--mh-line)] ufi:p-4">
-          <div className="ufi:mb-2.5 ufi:flex ufi:items-center ufi:justify-between ufi:gap-2">
-            <label htmlFor="ufi-control-secret">API 密钥</label>
-            <button
-              type="button"
-              className={`ufi:m-0 ufi:border-0 ufi:bg-none ufi:bg-transparent ufi:p-1 ufi:text-xs ufi:text-[#0a84ff] ufi:cursor-pointer ${focus}`}
-              onClick={() => void model.perform('view-secret')}
-            >
-              查看当前密钥
-            </button>
-          </div>
-          <Input
-            id="ufi-control-secret"
-            type="password"
-            autoComplete="new-password"
-            placeholder="留空保持现有密钥"
-            disabled={values.resetSecret}
-            {...form.register('controlSecret', {
-              validate: (value) => model.validate('controlSecret', value),
-            })}
-            aria-invalid={!!errors.controlSecret}
-            aria-describedby={
-              errors.controlSecret?.message ? 'ufi-secret-error' : undefined
-            }
-          />
-          <Hint id="ufi-secret-error" error>
-            {errors.controlSecret?.message}
-          </Hint>
-          <label className="ufi:my-2 ufi:flex ufi:min-h-11 ufi:items-center ufi:gap-2 ufi:text-xs">
-            <input
-              type="checkbox"
-              className="ufi:m-0 ufi:h-4 ufi:w-4 ufi:accent-[#0a84ff]"
-              {...form.register('resetSecret', {
-                onChange: (event) => {
-                  if (event.target.checked)
-                    form.setValue('controlSecret', '', { shouldDirty: true });
-                },
-              })}
-            />
-            重新生成密钥
-          </label>
-          <ActionButton
-            model={model}
-            action="save-controller"
-            label="保存并应用"
-            icon={Check}
-            primary
-            extraReason={pending ? '' : '设置未改变'}
-          />
-          <Hint>
-            {device?.running
-              ? '应用后会重启代理'
-              : device?.config
-                ? '保存后生效'
-                : '保存后随订阅生效'}
-          </Hint>
-        </div>
-      </fieldset>
+        <Hint>{device?.running ? '应用后会重启代理' : device?.config ? '保存后生效' : '保存后随订阅生效'}</Hint>
+      </div>
     </section>
   );
 }

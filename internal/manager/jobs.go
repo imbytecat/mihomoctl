@@ -206,6 +206,9 @@ func (a *Manager) Worker(id string) (err error) {
 	if err != nil || e != nil || !os.SameFile(actual, expected) {
 		return errors.New("invalid task lock")
 	}
+	// ExtraFiles clears CLOEXEC for the handoff. The worker owns the lock;
+	// supervisors, cores and other exec descendants must not retain it.
+	syscall.CloseOnExec(int(lock.Fd()))
 	if err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		return err
 	}

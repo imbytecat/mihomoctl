@@ -13,7 +13,19 @@ type ControllerInput struct {
 	Port    int     `json:"port"`
 	Secret  *string `json:"secret,omitempty"`
 	Reset   bool    `json:"reset,omitempty"`
+	YAML    *string `json:"yaml,omitempty"`
 }
+
+func (input ControllerInput) MarshalJSON() ([]byte, error) {
+	if input.YAML != nil {
+		return json.Marshal(struct {
+			YAML string `json:"yaml"`
+		}{*input.YAML})
+	}
+	type fields ControllerInput
+	return json.Marshal(fields(input))
+}
+
 type Params struct {
 	ReleaseProxy *string          `json:"releaseProxy,omitempty"`
 	URL          string           `json:"url,omitempty"`
@@ -44,6 +56,12 @@ func DecodeRequest(data []byte) (Request, error) {
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return req, errors.New("请求格式无效")
 	}
+	if req.Params.Controller != nil && req.Params.Controller.YAML != nil {
+		var controller map[string]json.RawMessage
+		if err := json.Unmarshal(fields.Params["controller"], &controller); err != nil || len(controller) != 1 {
+			return req, errors.New("yaml 不能与其他控制面板参数混用")
+		}
+	}
 	provided := make(map[string]bool, len(fields.Params))
 	for name := range fields.Params {
 		provided[strings.ToLower(name)] = true
@@ -73,8 +91,11 @@ func (r Request) validate(provided map[string]bool) error {
 		allowURL = true
 	case "save-controller":
 		allowController = true
-		if p.Controller == nil || p.Controller.Enabled == nil {
+		if p.Controller == nil || (p.Controller.Enabled == nil && p.Controller.YAML == nil) {
 			return errors.New("缺少控制面板参数")
+		}
+		if p.Controller.YAML != nil && (p.Controller.Enabled != nil || p.Controller.Port != 0 || p.Controller.Secret != nil || p.Controller.Reset) {
+			return errors.New("yaml 不能与其他控制面板参数混用")
 		}
 	case "install", "download", "download-dashboard", "self-update", "stop", "restart", "boot-on", "boot-off", "uninstall":
 	default:

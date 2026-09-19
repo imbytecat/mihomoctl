@@ -17,7 +17,7 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { subscriptionURL, interfaces, releaseProxy, releaseURL } from '../src/config';
+import { subscriptionURL, interfaces, releaseProxy, releaseURL, controllerSettings, withGeneratedSecret } from '../src/config';
 import { quote, shellCommand, shellResult } from '../src/transport/ufi';
 import {
   disabledReason,
@@ -444,7 +444,7 @@ test('UI gates actions by real prerequisites and keeps recovery actions accessib
     ...emptyState,
     agent: true,
     service: true,
-    controller: { enabled: true, port: 9090, applied: false },
+    controller: { enabled: true, port: 9090, applied: false, overrides: true },
   };
   expect(lifecycleAction(null)).toBe('uninstall');
   expect(lifecycleAction(emptyState)).toBe('install');
@@ -491,7 +491,7 @@ test('UI gates actions by real prerequisites and keeps recovery actions accessib
   expect(disabledReason('open-dashboard', ready)).toContain('安装面板');
   const panel = {
     ...ready,
-    controller: { enabled: true, port: 9090, applied: true },
+    controller: { enabled: true, port: 9090, applied: true, overrides: true },
     dashboard: { installed: true, ready: true, version: 'v1.0.0' },
   };
   expect(disabledReason('open-dashboard', panel)).toContain('启动');
@@ -671,6 +671,11 @@ test('component versions and task placement stay consistent', () => {
     hash: '', started: new Date().toISOString(), downloaded: 0, total: 0, speed: 0, cancellable: false, cancelRequested: false,
   });
   expect(topTask(job)).toBe(false);
+  const locked = { ...emptyState, agent: true, service: true, running: true, listeners: true, locked: true, task: job, controller: { enabled: true, port: 9090, applied: true, overrides: true }, dashboard: { installed: true, ready: true, version: 'test' } };
+  expect(disabledReason('stop', locked)).toContain('控制锁尚未释放');
+  expect(disabledReason('stop', { ...locked, task: { ...job, action: 'start', state: 'running' } })).toContain('查看任务进度');
+  expect(disabledReason('open-dashboard', locked)).toBe('');
+  expect(disabledReason('stop', { ...locked, locked: false })).toBe('');
   const timed = describeTask({ ...job, started: '2026-09-15T07:51:08Z', updated: '2026-09-15T08:03:08Z', state: 'failed' });
   expect(timed).toContain('开始时间：');
   expect(timed).toContain('结束时间：');
@@ -681,4 +686,15 @@ test('component versions and task placement stay consistent', () => {
   expect(topTask({ ...job, action: 'update' })).toBe(false);
   expect(lifecycleAction({ ...emptyState, agent: true })).toBe('uninstall');
   expect(disabledReason('uninstall', { ...emptyState, agent: true })).toBe('');
+});
+
+
+test('override YAML accepts future fields but rejects malformed documents', () => {
+  for (const yaml of ['', '{}', 'mode: global\nlog-level: debug\n', 'future-option: [one, two]\ndns: { enhanced-mode: fake-ip }', 'external-controller: "0.0.0.0:9191"\nsecret: "abc#123"'])
+    expect(controllerSettings(yaml)).toEqual({ yaml });
+  for (const yaml of ['[1, 2]', 'key: 1\nkey: 2', 'key: 1\n---\nkey: 2', 'secret: [', 'x'.repeat(21 * 1024)])
+    expect(() => controllerSettings(yaml)).toThrow();
+  const generated = withGeneratedSecret('mode: rule\n');
+  expect(generated).toContain('mode: rule');
+  expect(generated).toMatch(/secret: [a-f0-9]{64}/);
 });

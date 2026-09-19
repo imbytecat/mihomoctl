@@ -77,7 +77,7 @@ func (a *Manager) Inspect() (Status, error) {
 			return status, e
 		}
 		config, _ := a.configuration()
-		status.Controller = &ControllerStatus{Enabled: control.Enabled, Port: control.Port, Applied: config.Controller != nil}
+		status.Controller = &ControllerStatus{Enabled: control.Enabled, Port: control.Port, Applied: config.Controller != nil, Overrides: true}
 		status.Dashboard = a.dashboard()
 	}
 	if status.Settings.Interfaces == nil {

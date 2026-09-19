@@ -56,6 +56,9 @@ func TestMain(m *testing.M) {
 		if address := os.Getenv("UFI_TEST_HTTP"); address != "" {
 			a.httpTransport = localTransport{address}
 		}
+		if os.Getenv("UFI_TEST_RUNTIME_CHILD") == "1" {
+			a.Platform = lockTestRuntime{Adapter: a.Platform, root: *root}
+		}
 		if err = a.Worker(flags.Arg(0)); err != nil {
 			os.Exit(1)
 		}

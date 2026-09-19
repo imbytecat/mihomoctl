@@ -23,14 +23,15 @@
 - UFI uploads 公开可读，Root Shell 会记录命令和响应。请求使用 libsodium sealed box；上传先校验文件类型、大小和摘要，再交给 Manager。明文订阅、配置、密钥不能进入公开文件、命令参数或响应日志。
 - 本地 CLI 的秘密通过 JSON 文件 / stdin 传入，不通过 argv。结构化 params 拒绝未知字段与不适用参数；不保留旧 value 字段或嵌套 JSON。
 - 密钥读取仍通过浏览器临时公钥加密响应。Dashboard 链接不携带密钥。SQLite 不是整库加密，私有目录、0600 数据库和秘密脱敏仍必需。
-- Submit 持有 control.lock，将锁描述符传给 worker。worker 先等待启动 gate；Linux 必须先进入 systemd scope 再放行，setsid 不能替代 cgroup 托管。
+- Submit 持有 control.lock，将锁描述符传给 worker。worker 先等待启动 gate，接管后设置控制锁 FD_CLOEXEC，防止守护或内核继承控制锁；Linux 必须先进入 systemd scope 再放行，setsid 不能替代 cgroup 托管。
 - 接收任务时，状态、密文、HMAC 防重放摘要和最新任务指针在同一 SQLite 事务提交。相同语义请求重新加密后仍识别同一 ID；不同内容复用 ID 必须拒绝。
 - 进度和取消属于原任务：SQLite 保存下载字节、总量、速度、开始时间及取消标志。cancel 不获取 worker 持有的 control.lock、不创建新任务；取消接受与不可取消的提交边界通过条件 UPDATE 互斥，worker 通过 context 停止 I/O 并清理，不能用浏览器断开或强杀进程冒充取消。初装由引导脚本用任务目录内的控制锁串行化取消与安装交接，仅终止自己启动的 curl。
 - 请求密文在完成后清理，防重放记录保留。丢失响应后只查询原 ID；ky 和任务提交都禁止自动重发。
 - SQLite 连接从 Open 到 Close 持有 state.lock 共享锁；卸载关闭自己的连接后取得独占锁，排空观察者并阻止新 WAL/SHM 创建。普通 Open 使用 mode=rw，不能创建缺失数据库。
 - 前端卸载入口独立于状态解析：直接调用设备现有 ctl 的 uninstall 控制命令，使用固定任务 ID 查询最小卸载回执，不读取或转换其他版本的运行状态。状态不可用时仍展示卸载入口及原始原因；所有删除由设备 ctl 按所有权规则完成。
 - 卸载先完成平台清理，再删除文件，最后删除数据库和锁。成功后不能再写任务状态；前端以安装目录和平台额外目录确实消失确认完成。失败不能假报成功，不留卸载备份。
-- 原始 YAML、运行 YAML 和元数据同属一个配置版本。先校验，再记录 journal，切换 current，重启并验证；失败恢复完整旧版本。SQLite 事务不能替代文件 / 进程回滚。
+- 原始 YAML、本地覆写、运行 YAML 和元数据同属一个配置版本。先校验，再记录 journal，切换 current，重启并验证；失败恢复完整旧版本。SQLite 事务不能替代文件 / 进程回滚。
+- 本地覆写使用私有 overrides.yaml：有配置时归属当前 generation，无配置时保存于 runtime；缺省使用基础管理设置。普通字段经 mergo 深度合并后交给 Mihomo 校验，平台必要监听与接管约束保留。编辑器读取通过 controller-secret --config 返回 sealed box；普通 status 不返回覆写明文。
 - 保存完成、后台刷新、任务重连不能覆盖用户更新的草稿。运行状态和任务状态分开，完成提示不常驻首页。
 
 ## 平台所有权

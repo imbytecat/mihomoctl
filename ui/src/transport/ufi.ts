@@ -255,13 +255,14 @@ export async function deviceLogs(diagnose = false) {
   return typeof result === 'string' ? result : '';
 }
 
-export async function readControllerSecret() {
+export async function readControllerSecret(overrides = false) {
   await sodium.ready;
   const key = sodium.crypto_box_keypair();
   try {
     const sealed = await agent([
       'controller-secret',
       sodium.to_base64(key.publicKey, sodium.base64_variants.ORIGINAL),
+      ...(overrides ? ['--config'] : []),
     ]);
     if (typeof sealed !== 'string') throw new Error('密钥响应无效');
     const value = sodium.to_string(

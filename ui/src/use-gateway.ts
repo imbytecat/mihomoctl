@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import PQueue from 'p-queue';
 import { toast } from 'sonner';
-import { subscriptionURL, interfaces, releaseProxy } from './config';
+import { subscriptionURL, interfaces, releaseProxy, controllerSettings } from './config';
 import {
   bootstrapAgent,
   uninstallAgent,
@@ -27,20 +27,14 @@ type Fields = {
   releaseProxy: string;
   subscription: string;
   interfaces: string;
-  controlEnabled: boolean;
-  controlPort: string;
-  controlSecret: string;
-  resetSecret: boolean;
+  controllerYaml: string;
 };
 export type Operation = Exclude<Action, 'save-interfaces' | 'open-dashboard'>;
 const defaults: Fields = {
   releaseProxy: '',
   subscription: '',
   interfaces: '',
-  controlEnabled: true,
-  controlPort: '9090',
-  controlSecret: '',
-  resetSecret: false,
+  controllerYaml: '',
 };
 const notification = {
   id: 'mihomoctl-operation',
@@ -68,6 +62,9 @@ export function useGateway() {
   const [saved, setSaved] = useState<string | null>(null);
   const savedRef = useRef(saved);
   const loaded = useRef(false);
+  const controllerSaved = useRef<string | null>(null);
+  const controllerVersion = useRef('');
+  const [controllerError, setControllerError] = useState('');
   const open = useRef(false);
   const [detail, setDetail] = useState('');
   const [detailOpen, setDetailOpen] = useState(false);
@@ -120,6 +117,13 @@ export function useGateway() {
       throw error;
     }
   };
+  const loadControllerDraft = async (expected: string | null) => {
+    const text = await readControllerSecret(true);
+    controllerSaved.current = text;
+    setControllerError('');
+    if (expected !== null && form.getValues('controllerYaml') === expected)
+      form.resetField('controllerYaml', { defaultValue: text });
+  };
   const refresh = async () => {
     const state = await readState();
     if (state.agent && !form.getFieldState('releaseProxy').isDirty)
@@ -142,15 +146,17 @@ export function useGateway() {
           });
         setSaved(value);
         loaded.current = true;
-        if (state.controller) {
-          if (!form.getFieldState('controlEnabled').isDirty)
-            form.resetField('controlEnabled', {
-              defaultValue: state.controller.enabled,
-            });
-          if (!form.getFieldState('controlPort').isDirty)
-            form.resetField('controlPort', {
-              defaultValue: String(state.controller.port),
-            });
+        if (state.controller?.overrides) {
+          const revision = `${state.task?.id}:${state.task?.state}:${state.controller.enabled}:${state.controller.port}`;
+          const draft = form.getValues('controllerYaml');
+          if ((controllerSaved.current === null || draft === controllerSaved.current) && revision !== controllerVersion.current) {
+            try {
+              await loadControllerDraft(draft);
+              controllerVersion.current = revision;
+            } catch {
+              setControllerError('无法读取设备上的覆写，恢复连接后刷新再试');
+            }
+          }
         }
       } catch (error) {
         deviceRef.current = null;
@@ -390,26 +396,20 @@ export function useGateway() {
             loaded.current = false;
             break;
           case 'save-controller': {
-            if (!(await form.trigger(['controlPort', 'controlSecret'])))
-              throw new Error('请检查控制面板设置');
-            const input = {
-              enabled: snapshot.controlEnabled,
-              port: Number(snapshot.controlPort),
-              secret: snapshot.controlSecret || undefined,
-              reset: snapshot.resetSecret,
-            };
+            if (!(await form.trigger('controllerYaml')))
+              throw new Error('请检查控制面板 YAML');
+            const input = controllerSettings(snapshot.controllerYaml);
             result = await waitTask(
               await submitTask('save-controller', { controller: input }),
               observe,
             );
-            form.resetField('controlSecret', { defaultValue: '' });
-            form.resetField('resetSecret', { defaultValue: false });
-            form.resetField('controlEnabled', {
-              defaultValue: snapshot.controlEnabled,
-            });
-            form.resetField('controlPort', {
-              defaultValue: String(input.port),
-            });
+            try {
+              await loadControllerDraft(snapshot.controllerYaml);
+            } catch {
+              controllerSaved.current = snapshot.controllerYaml;
+              setControllerError('覆写已应用，但无法读取保存结果，请刷新重试');
+            }
+            controllerVersion.current = '';
             setSecret('');
             break;
           }
@@ -432,6 +432,9 @@ export function useGateway() {
             result = await waitTask(await uninstallAgent(), observe);
             loaded.current = false;
             form.reset(defaults);
+            controllerSaved.current = null;
+            controllerVersion.current = '';
+            setControllerError('');
             savedRef.current = null;
             setSaved(savedRef.current);
             break;
@@ -535,12 +538,9 @@ export function useGateway() {
         (
           [
             'releaseProxy',
-            'controlEnabled',
-            'controlPort',
-            'controlSecret',
-            'resetSecret',
           ] as const
         ).some((name) => form.getFieldState(name).isDirty) ||
+        (controllerSaved.current !== null && form.getValues('controllerYaml') !== controllerSaved.current) ||
         (form.getFieldState('interfaces').isDirty && dirty())
       ) {
         event.preventDefault();
@@ -554,7 +554,7 @@ export function useGateway() {
   }, []);
 
   const validate = (
-    name: 'subscription' | 'interfaces' | 'controlPort' | 'controlSecret' | 'releaseProxy',
+    name: 'subscription' | 'interfaces' | 'controllerYaml' | 'releaseProxy',
     value: string,
   ) => {
     try {
@@ -562,18 +562,10 @@ export function useGateway() {
         releaseProxy(value);
         return true;
       }
-      if (name === 'controlPort')
-        return (
-          (/^\d+$/.test(value) &&
-            Number(value) >= 1024 &&
-            Number(value) <= 65535 &&
-            ![7894, 1053].includes(Number(value))) ||
-          '请输入可用的 1024–65535 端口'
-        );
-      if (name === 'controlSecret')
-        return (
-          /^[\x21-\x7e]*$/.test(value) || '密钥包含无法用于 HTTP 鉴权的字符'
-        );
+      if (name === 'controllerYaml') {
+        controllerSettings(value);
+        return true;
+      }
       if (name === 'subscription') {
         if (value.trim()) subscriptionURL(value.trim());
       } else interfaces(value);
@@ -604,6 +596,9 @@ export function useGateway() {
     busy,
     form,
     values,
+    controllerDirty: controllerSaved.current !== null && values.controllerYaml !== controllerSaved.current,
+    controllerLoaded: controllerSaved.current !== null,
+    controllerError,
     saveStatus,
     validate,
     autosave,

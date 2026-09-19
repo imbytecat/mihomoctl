@@ -1,5 +1,6 @@
 // Development-only persistent task mock; never included in the plugin.
 import sodium from 'libsodium-wrappers';
+import { parse as parseYAML, stringify as stringifyYAML } from 'yaml';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { parse } from 'shell-quote';
@@ -22,7 +23,7 @@ const ready = {
   coreVersion: 'v1.19.30',
   config: true,
   subscription: true,
-  controller: { enabled: true, port: 9090, applied: true },
+  controller: { enabled: true, port: 9090, applied: true, overrides: true },
 };
 const scenarios: Record<string, DeviceState> = {
   'missing-service': emptyState,
@@ -71,6 +72,8 @@ const state: DeviceState =
   persisted?.state || structuredClone(scenarios[scenario] || emptyState);
 let controllerSecret =
   persisted?.controllerSecret || 'mock-controller-key-not-a-real-secret';
+let overrides = persisted?.overrides || '';
+const defaultOverrides = () => stringifyYAML({ 'external-controller': state.controller?.enabled ? `0.0.0.0:${state.controller.port}` : '', secret: controllerSecret });
 let pending: Pending | null = persisted?.pending || null;
 const jobs: Record<string, DeviceJob> = persisted?.jobs || {};
 const commands: string[] = [],
@@ -90,7 +93,7 @@ const flags = globalThis as typeof globalThis & {
 const save = () =>
   sessionStorage.setItem(
     storageKey,
-    JSON.stringify({ state, pending, jobs, controllerSecret }),
+    JSON.stringify({ state, pending, jobs, controllerSecret, overrides }),
   );
 function statusSnapshot() {
   const snapshot = structuredClone(state);
@@ -131,7 +134,7 @@ function advance() {
         state.agent = state.service = true;
         if (intent.action === 'bootstrap') state.settings.releaseProxy = intent.params.releaseProxy || '';
         state.version = 'v9.8.7';
-        state.controller = { enabled: true, port: 9090, applied: false };
+        state.controller = { enabled: true, port: 9090, applied: false, overrides: true };
         job.result = 'Mihomo 服务已安装';
         break;
       case 'self-update':
@@ -162,17 +165,24 @@ function advance() {
         job.result = '配置已更新';
         break;
       case 'save-controller': {
-        const value = intent.params.controller!;
-        state.controller = {
-          enabled: value.enabled,
-          port: value.port,
-          applied: state.config,
-        };
-        if (value.reset) controllerSecret = 'mock-regenerated-controller-key';
-        else if (value.secret) controllerSecret = value.secret;
-        state.dashboard.ready =
-          state.dashboard.installed && state.config && value.enabled;
-        job.result = '面板设置已应用';
+        const input = intent.params.controller!;
+        if ('yaml' in input) {
+          const data = parseYAML(input.yaml) || {};
+          if (data['external-controller'] !== undefined) {
+            state.controller!.enabled = !!data['external-controller'];
+            if (state.controller!.enabled) state.controller!.port = Number(String(data['external-controller']).split(':').at(-1));
+          }
+          if (data.secret !== undefined) controllerSecret = data.secret;
+          overrides = Object.keys(data).length ? input.yaml : defaultOverrides();
+          state.controller!.applied = state.config;
+        } else {
+          state.controller = { enabled: input.enabled, port: input.port, applied: state.config, overrides: true };
+          if (input.reset) controllerSecret = 'mock-regenerated-controller-key';
+          else if (input.secret) controllerSecret = input.secret;
+          overrides = defaultOverrides();
+        }
+        state.dashboard.ready = state.dashboard.installed && state.config && state.controller!.enabled;
+        job.result = '覆写已应用';
         break;
       }
       case 'download-dashboard':
@@ -357,7 +367,7 @@ Object.assign(globalThis, {
           case 'controller-secret':
             result = sodium.to_base64(
               sodium.crypto_box_seal(
-                sodium.from_string(controllerSecret),
+                sodium.from_string(args.includes('--config') ? overrides || defaultOverrides() : controllerSecret),
                 sodium.from_base64(args[2]!, sodium.base64_variants.ORIGINAL),
               ),
               sodium.base64_variants.ORIGINAL,

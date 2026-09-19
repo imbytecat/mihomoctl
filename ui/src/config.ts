@@ -1,3 +1,21 @@
+import { isMap, parseDocument } from 'yaml';
+import { bytesToHex } from '@noble/hashes/utils.js';
+
+export function controllerSettings(text: string) {
+  if (new TextEncoder().encode(text).length > 20 * 1024) throw new Error('覆写 YAML 不能超过 20 KiB');
+  const document = parseDocument(text, { prettyErrors: false, uniqueKeys: true });
+  if (document.errors.length || document.warnings.length || (document.contents !== null && !isMap(document.contents)))
+    throw new Error('覆写必须是单个 YAML 映射，请检查缩进、重复字段和文档分隔符');
+  return { yaml: text };
+}
+
+export function withGeneratedSecret(text: string) {
+  controllerSettings(text);
+  const document = parseDocument(text || '{}');
+  document.set('secret', bytesToHex(crypto.getRandomValues(new Uint8Array(32))));
+  return document.toString();
+}
+
 export function interfaces(value: string): string {
   if (!value.trim() || value.trim() === 'auto') return 'auto';
   const names = [

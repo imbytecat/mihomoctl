@@ -25,7 +25,7 @@ for (const width of [360, 1280]) {
       marginTop: '0px', backgroundImage: 'none', fontSize: '14px', borderTopWidth: '0px',
     });
     await expect
-      .element(app.getByCSS('#ufi-control-port'))
+      .element(app.getByCSS('#ufi-controller-yaml'))
       .toHaveStyle({ fontSize: '16px' });
     await expect
       .element(app.getByCSS('#ufi-boot'))

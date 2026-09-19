@@ -20,7 +20,7 @@ export default defineConfig({
       {
         extends: true,
         publicDir: 'dist',
-        optimizeDeps: { entries: ['tests/browser/host.html'] },
+        optimizeDeps: { entries: ['tests/browser/host.html'], include: ['yaml'] },
         test: {
           name: 'browser',
           include: ['tests/browser/**/*.test.ts'],

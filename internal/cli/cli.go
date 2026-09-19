@@ -22,7 +22,7 @@ func New(version string) *cobra.Command {
 	var root string
 	var config platform.Config
 	var uploads, input, id, releaseProxy string
-	var noWait bool
+	var noWait, controllerConfig bool
 	command := &cobra.Command{Use: "mihomoctl", Short: "Manage Mihomo independently of its user interface", Version: version, SilenceUsage: true, SilenceErrors: true}
 	command.PersistentFlags().StringVar(&root, "root", "", "State directory (platform default when omitted)")
 	command.PersistentFlags().StringVar(&config.Kind, "platform", "", "Platform: ufi or linux (saved deployment when installed)")
@@ -110,6 +110,9 @@ func New(version string) *cobra.Command {
 		{"job ID", "Print task state", cobra.ExactArgs(1), false, func(_ *cobra.Command, m *manager.Manager, args []string) (any, error) { return m.Job(args[0]) }},
 		{"job-log ID", "Print sanitized task logs", cobra.ExactArgs(1), false, func(_ *cobra.Command, m *manager.Manager, args []string) (any, error) { return m.JobLog(args[0]) }},
 		{"controller-secret PUBLIC_KEY", "Encrypt the API key for the supplied public key", cobra.ExactArgs(1), false, func(_ *cobra.Command, m *manager.Manager, args []string) (any, error) {
+			if controllerConfig {
+				return m.ControllerOverrides(args[0])
+			}
 			return m.ControllerSecret(args[0])
 		}},
 		{"logs", "Print sanitized runtime logs", cobra.NoArgs, false, func(_ *cobra.Command, m *manager.Manager, _ []string) (any, error) { return m.Logs() }},
@@ -122,7 +125,7 @@ func New(version string) *cobra.Command {
 		"download":           "Install or update the Mihomo core",
 		"download-dashboard": "Install or update Zashboard",
 		"update":             "Fetch and apply the subscription configuration",
-		"save-controller":    "Save and apply controller settings",
+		"save-controller":    "Save and apply local YAML overrides or controller settings",
 		"save-interfaces":    "Save UFI shared network interfaces",
 		"start":              "Start Mihomo",
 		"stop":               "Stop Mihomo",
@@ -185,6 +188,8 @@ func New(version string) *cobra.Command {
 			child.Flags().StringVar(&releaseProxy, "release-proxy", "", "Public HTTPS origin hosting netnr/workers cors.js (empty: direct)")
 			child.Flags().StringVar(&config.Unit, "unit", "", "Service name (Linux)")
 			child.Flags().StringVar(&config.ListenAddress, "listen-address", "", "Local IPv4 listen address (Linux; loopback by default)")
+		case "controller-secret":
+			child.Flags().BoolVar(&controllerConfig, "config", false, "Encrypt the local YAML overrides instead of only the API key")
 		case "cancel":
 			child.Flags().BoolVar(&noWait, "no-wait", false, "Return the cancellation request immediately")
 		case "submit":
