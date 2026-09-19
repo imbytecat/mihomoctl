@@ -5,6 +5,7 @@ import {
   readUninstallJob,
   jobLog,
   baseURL,
+  deviceLogs,
 } from './transport/ufi';
 import type { DeviceJob } from './state';
 
@@ -32,6 +33,7 @@ export const phases: Record<string, string> = {
 export class TaskCancelled extends Error {
   constructor() { super('任务已取消'); }
 }
+export class TaskFailed extends Error {}
 export function transferText(job: DeviceJob, now = Date.now()) {
   const size = (bytes: number) => bytes >= 1048576
     ? `${(bytes / 1048576).toFixed(1)} MiB`
@@ -73,10 +75,7 @@ export async function waitTask(
   progress(job);
   if (job.state === 'cancelled') throw new TaskCancelled();
   if (job.state !== 'succeeded') {
-    const log = await jobLog(job).catch(() => '暂时无法读取任务日志');
-    throw new Error(
-      `设备任务失败\n执行阶段：${phases[job.phase] || job.phase}\n执行位置：设备\n任务 ID：${job.id}\n${job.error || '请查看任务日志'}\n${log}`,
-    );
+    throw new TaskFailed('设备任务失败\n' + await formatTaskDetails(job));
   }
   return job.result || '任务已完成';
 }
@@ -118,8 +117,18 @@ export async function taskDetails(task: DeviceJob) {
   const latest = task.action === 'bootstrap'
     ? await readBootstrap(task.id) || task
     : task.action === 'uninstall' ? await readUninstallJob(task) || task : await readJob(task.id);
-  const log = await jobLog(latest).catch(() => '暂时无法读取任务日志');
-  return describeTask(latest) + (log ? '\n\n' + log : '');
+  return formatTaskDetails(latest);
+}
+
+async function formatTaskDetails(task: DeviceJob) {
+  const activeRuntime = ['queued', 'running'].includes(task.state) &&
+    ['start', 'restart', 'stop', 'update', 'save-controller'].includes(task.action);
+  const [log, runtime] = await Promise.all([
+    jobLog(task).catch(() => '暂时无法读取任务日志'),
+    activeRuntime ? deviceLogs().catch(() => '暂时无法读取运行日志') : '',
+  ]);
+  return [describeTask(task), log && '任务日志\n' + log,
+    runtime && '运行日志（最近输出）\n' + runtime].filter(Boolean).join('\n\n');
 }
 
 export function controllerURL(base: string, port: number) {

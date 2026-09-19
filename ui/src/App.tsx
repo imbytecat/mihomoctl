@@ -95,7 +95,10 @@ export default function Gateway({ container }: { container: HTMLElement }) {
             )
           )}
           <Tabs.Root value={model.detailOpen ? 'logs' : tab} onValueChange={(value) => {
-            if (value === 'logs') model.setDetailOpen(true);
+            if (value === 'logs') {
+              if (!model.detail && model.device?.agent) void model.showRuntimeLogs();
+              else model.setDetailOpen(true);
+            }
             else { setTab(String(value)); model.setDetailOpen(false); }
           }} className="ufi:mt-4">
             <Tabs.List aria-label="Mihomo 功能" className="ufi:flex ufi:gap-1 ufi:rounded-xl ufi:bg-[var(--mh-group)] ufi:p-1">

@@ -240,7 +240,7 @@ function submit(intent: Intent, hash = '') {
     id: intent.id,
     action: intent.action,
     state: 'running',
-    phase: 'download',
+    phase: ['start', 'restart'].includes(intent.action) ? 'starting' : 'download',
     hash,
     started: new Date().toISOString(),
     downloaded: 0, total: 0, speed: 0,

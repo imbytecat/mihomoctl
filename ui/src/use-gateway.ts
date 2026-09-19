@@ -1,4 +1,4 @@
-import { waitTask, describeTask, taskDetails, TaskCancelled } from './gateway';
+import { waitTask, describeTask, taskDetails, TaskCancelled, TaskFailed } from './gateway';
 import { useEffect, useRef, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import PQueue from 'p-queue';
@@ -72,9 +72,20 @@ export function useGateway() {
   const [detail, setDetail] = useState('');
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailTitle, setDetailTitle] = useState('操作详情');
+  const detailTitleRef = useRef(detailTitle);
+  detailTitleRef.current = detailTitle;
   const [secret, setSecret] = useState('');
   const [error, setError] = useState(false);
   const detailRequest = useRef(0);
+  const followedTask = useRef('');
+  const followStartup = (task: DeviceJob | null) => {
+    if (!task || !['start', 'restart'].includes(task.action) || !['queued', 'running'].includes(task.state) || followedTask.current === task.id) return;
+    followedTask.current = task.id;
+    detailRequest.current++;
+    setDetailTitle('任务详情');
+    setDetail(describeTask(task));
+    setDetailOpen(true);
+  };
   const observe = (task: DeviceJob) => {
     if (deviceRef.current) {
       const state = {
@@ -85,6 +96,7 @@ export function useGateway() {
       deviceRef.current = state;
       setDevice(state);
     } else setObservedTask(task);
+    followStartup(task);
   };
 
   const readState = async () => {
@@ -99,6 +111,7 @@ export function useGateway() {
       }
       deviceRef.current = state;
       setDevice(state);
+      followStartup(state.task);
       return state;
     } catch (error) {
       setStateError(error instanceof Error ? error.message : String(error));
@@ -180,12 +193,12 @@ export function useGateway() {
     }
   };
 
-  const refreshDetail = async () => {
+  const refreshDetail = async (accept = () => true) => {
     const revision = detailRequest.current;
     const task = deviceRef.current?.task || observedTask;
     const text = detailTitle === '任务详情' && task ? await taskDetails(task)
       : detailTitle === '运行日志' ? await deviceLogs() : null;
-    if (text !== null && revision === detailRequest.current) setDetail(text);
+    if (text !== null && revision === detailRequest.current && accept()) setDetail(text);
   };
 
   const showRuntimeLogs = async () => {
@@ -294,9 +307,9 @@ export function useGateway() {
     busyRef.current = true;
     setBusy(id);
     setError(false);
-    setDetailTitle('操作详情');
+    if (!['任务详情', '运行日志'].includes(detailTitleRef.current)) setDetailTitle('操作详情');
     let failed = false;
-    if (!quiet && !installationTask(id))
+    if (!quiet && !installationTask(id) && !['start', 'restart'].includes(id))
       toast.loading('正在处理…', notification);
     try {
       await queue.add(async () => {
@@ -434,8 +447,10 @@ export function useGateway() {
           default:
             result = await waitTask(await submitTask(id), observe);
         }
-        if (!quiet && id !== 'refresh') setDetail(result);
+        if (!quiet && id !== 'refresh' && !['任务详情', '运行日志'].includes(detailTitleRef.current)) setDetail(result);
         if (id === 'logs' || id === 'diagnose') {
+          detailRequest.current++;
+          setDetail(result);
           setDetailTitle(id === 'logs' ? '运行日志' : '网络诊断');
           setDetailOpen(true);
         }
@@ -456,6 +471,8 @@ export function useGateway() {
         return;
       }
       failed = true;
+      detailRequest.current++;
+      setDetailTitle(error instanceof TaskFailed ? '任务详情' : '操作详情');
       const text = error instanceof Error ? error.message : String(error);
       setError(true);
       setDetail(text);

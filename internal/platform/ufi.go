@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -21,6 +22,19 @@ import (
 
 //go:embed network_ufi.sh
 var networkScript []byte
+
+var listenConflict = regexp.MustCompile(`\blevel="?error"? .*\blisten (?:tcp|udp)[46]? [^ ]+:([0-9]+): bind: address already in use`)
+
+func startupListenError(path string, offset int64) error {
+	data, err := fsutil.ReadTailSince(path, offset, 8*1024)
+	if err != nil {
+		return nil // Readiness checks still own missing or unreadable log failures.
+	}
+	if match := listenConflict.FindSubmatch(data); match != nil {
+		return fmt.Errorf("监听端口 %s 已被占用，请更换为空闲端口或停止占用该端口的程序", match[1])
+	}
+	return nil
+}
 
 const UFIUploads = "/data/data/com.minikano.f50_sms/files/uploads"
 
@@ -202,7 +216,7 @@ func (a *UFIAdapter) Start(ctx context.Context, options StartOptions) error {
 	var exitErr error
 	var readyErr error
 	failure := func(cause error) error {
-		state := fmt.Errorf("代理启动失败：失败时守护进程存活=%t，内核存活=%t", a.alive("supervisor"), a.alive("core"))
+		state := fmt.Errorf("失败时状态（清理前）：守护进程存活=%t，内核存活=%t", a.alive("supervisor"), a.alive("core"))
 		if readyErr == nil {
 			probe, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			readyErr = a.network(probe, "ready")
@@ -231,10 +245,12 @@ func (a *UFIAdapter) Start(ctx context.Context, options StartOptions) error {
 			}
 		}
 		cleanup := errors.Join(childErr, a.Stop(context.Background()))
+		cleanupResult := errors.New("清理结果：本次进程已停止，本安装网络规则已清理；配置与日志保留")
 		if cleanup != nil {
 			cleanup = fmt.Errorf("启动失败后的清理也失败：%w", cleanup)
+			cleanupResult = errors.New("清理结果：未完成，请查看清理错误并重试停止操作")
 		}
-		details := []error{state, cause, readyErr, cleanup}
+		details := []error{fmt.Errorf("代理启动失败：%w", cause), cleanupResult, state, readyErr, cleanup}
 		for _, name := range []string{"supervisor.log", "core.log"} {
 			data, err := fsutil.ReadTailSince(a.runtime(name), offsets[name], 8*1024)
 			if err == nil && len(data) > 0 {
@@ -259,6 +275,9 @@ func (a *UFIAdapter) Start(ctx context.Context, options StartOptions) error {
 			}
 			return failure(fmt.Errorf("本次守护进程退出：%w", exitErr))
 		case <-time.After(time.Second):
+		}
+		if err := startupListenError(a.runtime("core.log"), offsets["core.log"]); err != nil {
+			return failure(err)
 		}
 		readyErr = a.network(ctx, "ready")
 		if readyErr == nil && !a.alive("supervisor") {

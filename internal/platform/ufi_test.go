@@ -53,7 +53,7 @@ func TestUFIStartupReturnsReadinessLogsAndCleanupFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("failed startup reported success")
 	}
-	for _, reason := range []string{"required listeners missing", "TPROXY unavailable", "cleanup route failed"} {
+	for _, reason := range []string{"required listeners missing", "TPROXY unavailable", "cleanup route failed", "清理结果：未完成", "清理前"} {
 		if !strings.Contains(err.Error(), reason) {
 			t.Errorf("lost startup evidence %q: %v", reason, err)
 		}
@@ -62,6 +62,51 @@ func TestUFIStartupReturnsReadinessLogsAndCleanupFailure(t *testing.T) {
 		if strings.Contains(err.Error(), hidden) {
 			t.Errorf("leaked secret or stale evidence: %v", err)
 		}
+	}
+}
+
+func TestUFIStartupRecognizesOnlyNewListenConflicts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "core.log")
+	old := "time=old level=error msg=\"External controller listen error: listen tcp 0.0.0.0:9090: bind: address already in use\"\n"
+	other := "time=new level=error msg=\"[GEO] Failed to update GEO database: EOF\"\n"
+	if err := os.WriteFile(path, []byte(old+other), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := startupListenError(path, int64(len(old))); err != nil {
+		t.Fatal("old conflicts or GEO errors must not abort a new start", err)
+	}
+	if err := os.WriteFile(path, []byte(old+other+strings.ReplaceAll(old, "9090", "9191")), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := startupListenError(path, int64(len(old))); err == nil || !strings.Contains(err.Error(), "9191") {
+		t.Fatal("missing current listen conflict", err)
+	}
+}
+
+func TestUFIStartupListenConflictFailsBeforeReadinessTimeout(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "mihomoctl")
+	executable := filepath.Join(root, "mihomoctl")
+	script := "#!/bin/sh\necho 'level=error msg=\"External controller listen error: listen tcp 0.0.0.0:9090: bind: address already in use\"' >> '" + filepath.Join(root, "runtime", "core.log") + "'\nexec sleep 20\n"
+	if err := fsutil.AtomicWrite(executable, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := fsutil.WriteJSON(filepath.Join(root, "runtime", "firewall.json"), firewall{IPv4: "/fixture/iptables", IPv6: "/fixture/ip6tables", Backend: "legacy"}); err != nil {
+		t.Fatal(err)
+	}
+	a := NewUFI(Environment{Root: root, Executable: executable, Run: func(_ context.Context, _ []*os.File, _ string, args ...string) ([]byte, error) {
+		if args[len(args)-1] == "--version" {
+			return []byte("iptables v1.8.7 (legacy)"), nil
+		}
+		if args[2] == "ready" {
+			return []byte("controller listener missing"), errors.New("exit status 1")
+		}
+		return nil, nil
+	}})
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	err := a.Start(ctx, StartOptions{})
+	if err == nil || errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "监听端口 9090 已被占用") || !strings.Contains(err.Error(), "清理结果：本次进程已停止") {
+		t.Fatal("listen conflict did not fail promptly with cleanup result", err)
 	}
 }
 

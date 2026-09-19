@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 	"time"
 
@@ -221,7 +222,8 @@ func (a *Manager) Worker(id string) (err error) {
 		if err != nil {
 			job.State = "failed"
 			job.Error = taskError(err)
-			logger.Error("任务失败", "phase", job.Phase, "error", job.Error, "duration", time.Since(started))
+			// Full diagnostics already live in the task record; do not embed entire runtime logs again.
+			logger.Error("任务失败", "phase", job.Phase, "error", strings.SplitN(job.Error, "\n", 2)[0], "duration", time.Since(started))
 			_ = a.writeJob(&job)
 		}
 	}()

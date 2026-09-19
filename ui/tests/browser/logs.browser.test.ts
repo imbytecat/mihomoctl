@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { app, evaluate, idle, open } from './app';
+import { app, evaluate, idle, open, reload } from './app';
 
 test('inline runtime logs refresh, pause and stop following while reading older lines', async () => {
   await open('ready');
@@ -39,4 +39,39 @@ test('startup failure automatically opens the inline reason and runtime evidence
   await expect.element(app.getByCSS('[data-log-panel]')).toBeVisible();
   await expect.element(app.getByCSS('[data-output]')).toMatchTextContent('address already in use');
   await expect.element(app.getByCSS('[data-dialog=result]')).not.toBeInTheDocument();
+});
+
+
+test('startup shows kernel output before completion and resumes after page reload', async () => {
+  await open('ready');
+  await evaluate('mockTaskDelayMs = 60000; mockRuntimeLog = "core.log\\nStarting kernel"');
+  await app.getByRole('button', { name: '启动代理', exact: true }).click();
+  await expect.element(app.getByRole('tab', { name: '日志', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect.element(app.getByCSS('[data-output]')).toMatchTextContent('Starting kernel');
+  expect(evaluate('mockDeviceState.task.state')).toBe('running');
+  await evaluate('mockRuntimeLog = "core.log\\nlevel=error msg=\\"External controller listen error: listen tcp 0.0.0.0:9090: bind: address already in use\\""');
+  await expect.element(app.getByCSS('[data-output]')).toMatchTextContent('address already in use');
+  await expect.element(app.getByCSS('[data-log-level=error]').last()).toHaveStyle({ color: 'rgb(255, 105, 97)' });
+  expect(evaluate('mockDeviceState.task.state')).toBe('running');
+  await app.getByRole('searchbox', { name: '搜索日志', exact: true }).fill('9090');
+  await expect.element(app.getByCSS('[data-output]')).toMatchTextContent('9090');
+  await expect.element(app.getByCSS('[data-output]')).not.toMatchTextContent('任务日志');
+  await reload();
+  await app.getByCSS('[data-plugin] > summary').click();
+  await expect.element(app.getByRole('tab', { name: '日志', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await evaluate('mockRuntimeLog = "core.log\\nKernel output after reconnect"');
+  await expect.element(app.getByCSS('[data-output]')).toMatchTextContent('Kernel output after reconnect');
+  expect(evaluate('mockIntents.length')).toBe(0);
+});
+
+
+test('ANSI colors and literal HTML stay inside the log viewer', async () => {
+  await open('ready');
+  await evaluate(`mockRuntimeLog = ${JSON.stringify('core.log\n\u001b[31mANSI red\u001b[0m\n<script>literal text</script>')}`);
+  await app.getByRole('tab', { name: '日志', exact: true }).click();
+  await expect.element(app.getByCSS('[data-output]')).toMatchTextContent('<script>literal text</script>');
+  await expect.element(app.getByCSS('[data-output] script')).not.toBeInTheDocument();
+  await expect.element(app.getByCSS('[data-output] span[style*=color]')).toHaveTextContent('ANSI red');
+  await app.getByRole('searchbox', { name: '搜索日志', exact: true }).fill('ANSI red');
+  await expect.element(app.getByCSS('[data-output]')).toHaveTextContent('ANSI red');
 });
