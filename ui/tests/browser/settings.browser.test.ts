@@ -117,19 +117,6 @@ test('controller transactions, encrypted secrets and task details', async () => 
   await idle();
   await openDashboard(9191, 'short');
   await expect.element(app.getByCSS('#ufi-controller-yaml')).toHaveValue(panelYaml(9393, 'secret: newer-draft-secret\n'));
-  await app.getByRole('button', { name: '查看当前密钥', exact: true }).click();
-  await expect
-    .element(app.getByCSS('[data-dialog=secret][data-state=open]'))
-    .toBeVisible();
-  await expect
-    .element(app.getByCSS('[data-dialog=secret] input'))
-    .toHaveValue('short');
-  expect(
-    evaluate(
-      'mockCommands.every(c => !c.includes(JSON.stringify({secret: "short"})))',
-    ),
-  ).toBe(true);
-  await closeModal('关闭密钥');
   await app.getByRole('button', { name: '更多操作', exact: true }).click();
   await app.getByRole('menuitem', { name: '运行日志', exact: true }).click();
   await expect
@@ -276,7 +263,7 @@ test('install after checking updates immediately disables redundant component up
   expect(evaluate('mockCommands.some(c => c.includes("check-updates"))')).toBe(false);
 });
 
-test('override editor preserves newer drafts and creates a secret without exposing it in shell requests', async () => {
+test('restoring override defaults is a draft edit and preserves newer typing during save', async () => {
   await open('ready');
   await app.getByRole('tab', { name: '设置', exact: true }).click();
   const editor = app.getByCSS('#ufi-controller-yaml');
@@ -290,21 +277,24 @@ test('override editor preserves newer drafts and creates a secret without exposi
   expect(evaluate('mockDeviceState.controller.port')).toBe(9191);
   await expect.element(editor).toHaveValue(original);
   expect(evaluate('window.dispatchEvent(new Event("beforeunload", { cancelable: true }))')).toBe(false);
-  await editor.fill(panelYaml(9191, 'future-option: true\n'));
-  await app.getByRole('button', { name: '生成新密钥', exact: true }).click();
-  const draft = (editor.element() as HTMLTextAreaElement).value;
-  expect(draft).toContain('future-option: true');
-  const secret = draft.match(/secret: ([a-f0-9]{64})/)![1]!;
+  const submitted = evaluate('mockIntents.length');
+  await editor.fill('secret: [\n');
+  await app.getByRole('button', { name: '恢复默认', exact: true }).click();
+  await expect.element(editor).toHaveValue('');
+  await expect.element(editor).toHaveAttribute('aria-invalid', 'false');
+  expect(evaluate('mockIntents.length')).toBe(submitted);
+  await app.getByCSS('[data-action=save-controller]').click();
+  await expect.poll(() => evaluate('mockDeviceState.locked')).toBe(true);
+  const newerDraft = panelYaml(9393, 'future-option: newer\n');
+  await editor.fill(newerDraft);
+  await idle();
+  await expect.element(editor).toHaveValue(newerDraft);
+  expect(evaluate('mockDeviceState.controller.port')).toBe(9191);
+  await app.getByRole('button', { name: '恢复默认', exact: true }).click();
   await app.getByCSS('[data-action=save-controller]').click();
   await idle();
-  expect(evaluate(`mockCommands.every(c => !c.includes(${JSON.stringify(secret)}))`)).toBe(true);
-  await app.getByRole('button', { name: '查看当前密钥', exact: true }).click();
-  await expect.element(app.getByCSS('[data-dialog=secret] input')).toHaveValue(secret);
-  await closeModal('关闭密钥');
-  await editor.fill('');
-  await app.getByCSS('[data-action=save-controller]').click();
-  await idle();
-  await expect.element(editor).toHaveValue(expect.stringContaining('external-controller:'));
-  await expect.element(editor).toHaveValue(expect.stringContaining(secret));
+  await expect.element(editor).toHaveValue(expect.stringContaining('external-controller: 0.0.0.0:9191'));
+  await expect.element(editor).toHaveValue(expect.stringContaining('mock-controller-key-not-a-real-secret'));
   await expect.element(editor).not.toHaveValue(expect.stringContaining('future-option'));
+  expect(evaluate('mockCommands.every(c => !c.includes("mock-controller-key-not-a-real-secret"))')).toBe(true);
 });

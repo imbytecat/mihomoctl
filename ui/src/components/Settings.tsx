@@ -1,4 +1,3 @@
-import { withGeneratedSecret } from '../config';
 import { Check } from 'lucide-react';
 import {
   componentVersion,
@@ -54,7 +53,7 @@ function RuntimeSettings({ model }: { model: GatewayModel }) {
 }
 
 function PanelSettings({ model }: { model: GatewayModel }) {
-  const { device, form, values } = model;
+  const { device, form } = model;
   const { errors } = form.formState;
   const pending = model.controllerDirty || (device?.config && !device.controller?.applied);
   return (
@@ -70,17 +69,14 @@ function PanelSettings({ model }: { model: GatewayModel }) {
           className={`ufi:block ufi:w-full ufi:min-w-0 ufi:m-0 ufi:resize-y ufi:rounded-xl ufi:border ufi:border-solid ufi:border-[var(--mh-line)] ufi:bg-none ufi:bg-white/5 ufi:p-3 ufi:font-mono ufi:text-base ufi:text-inherit ufi:leading-relaxed ufi:disabled:opacity-40 ${focus}`}
           {...form.register('controllerYaml', { validate: (value) => model.validate('controllerYaml', value), onChange: () => { if (form.getFieldState('controllerYaml').error) void form.trigger('controllerYaml'); } })}
           aria-invalid={!!errors.controllerYaml} aria-describedby="ufi-controller-yaml-help ufi-controller-yaml-error" />
-        <Hint id="ufi-controller-yaml-error" error>{errors.controllerYaml?.message}</Hint>
         <Hint error>{device?.controller && !device.controller.overrides ? '请先更新 mihomoctl 以使用通用覆写' : model.controllerError}</Hint>
-        <Hint id="ufi-controller-yaml-help">使用 Mihomo 配置字段；映射递归合并，数组整体替换。清空保存会填入基础管理设置，密钥保持不变。TPROXY、DNS 监听及平台绑定由管理器维护。</Hint>
+        <Hint id="ufi-controller-yaml-help">使用 Mihomo 配置字段；映射递归合并，数组整体替换。恢复默认会清空自定义覆写，保存后填入基础管理设置，保留当前端口和密钥。TPROXY、DNS 监听及平台绑定由管理器维护。</Hint>
         <div className="ufi:mt-3 ufi:flex ufi:flex-wrap ufi:gap-2">
           <ActionButton model={model} action="save-controller" label="保存并应用" icon={Check} primary extraReason={!model.controllerLoaded || !device?.controller?.overrides ? '请先读取设备覆写' : pending ? '' : '设置未改变'} />
-          <Button disabled={!model.controllerLoaded} onClick={() => {
-            try { form.setValue('controllerYaml', withGeneratedSecret(values.controllerYaml), { shouldDirty: true, shouldValidate: true }); }
-            catch { form.setError('controllerYaml', { message: '请先修正 YAML 格式后再生成密钥' }); }
-          }}>生成新密钥</Button>
-          <ActionButton model={model} action="view-secret" label="查看当前密钥" />
+          <Button disabled={!model.controllerLoaded || !device?.controller?.overrides}
+            onClick={() => form.setValue('controllerYaml', '', { shouldDirty: true, shouldValidate: true })}>恢复默认</Button>
         </div>
+        <Hint id="ufi-controller-yaml-error" error>{errors.controllerYaml?.message}</Hint>
         <Hint>{device?.running ? '应用后会重启代理' : device?.config ? '保存后生效' : '保存后随订阅生效'}</Hint>
       </div>
     </section>

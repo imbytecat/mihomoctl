@@ -17,7 +17,7 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { subscriptionURL, interfaces, releaseProxy, releaseURL, controllerSettings, withGeneratedSecret } from '../src/config';
+import { subscriptionURL, interfaces, releaseProxy, releaseURL, controllerSettings } from '../src/config';
 import { quote, shellCommand, shellResult } from '../src/transport/ufi';
 import {
   disabledReason,
@@ -725,7 +725,4 @@ test('override YAML accepts future fields but rejects malformed documents', () =
     expect(controllerSettings(yaml)).toEqual({ yaml });
   for (const yaml of ['[1, 2]', 'key: 1\nkey: 2', 'key: 1\n---\nkey: 2', 'secret: [', 'x'.repeat(21 * 1024)])
     expect(() => controllerSettings(yaml)).toThrow();
-  const generated = withGeneratedSecret('mode: rule\n');
-  expect(generated).toContain('mode: rule');
-  expect(generated).toMatch(/secret: [a-f0-9]{64}/);
 });

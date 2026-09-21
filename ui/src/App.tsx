@@ -10,7 +10,7 @@ import { Settings } from './components/Settings';
 import { Subscription } from './components/Subscription';
 import { TaskNotice } from './components/TaskNotice';
 import { LogPanel } from './components/LogPanel';
-import { Button, Input, Modal, focus } from './components/ui';
+import { Button, Modal, focus } from './components/ui';
 
 export default function Gateway({ container }: { container: HTMLElement }) {
   const model = useGateway();
@@ -143,25 +143,6 @@ export default function Gateway({ container }: { container: HTMLElement }) {
             卸载并删除数据
           </Button>
         </div>
-      </Modal>
-      <Modal
-        container={container}
-        kind="secret"
-        open={!!model.secret}
-        onOpenChange={(open) => {
-          if (!open) model.setSecret('');
-        }}
-        title="API 密钥"
-        description="首次连接面板时填写。选中文本即可复制。"
-        closeLabel="关闭密钥"
-      >
-        <Input
-          type="text"
-          aria-label="当前 API 密钥"
-          readOnly
-          value={model.secret}
-          onFocus={(event) => event.currentTarget.select()}
-        />
       </Modal>
     </>
   );

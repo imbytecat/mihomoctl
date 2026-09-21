@@ -75,7 +75,6 @@ export function useGateway() {
   const [detailTitle, setDetailTitle] = useState('操作详情');
   const detailTitleRef = useRef(detailTitle);
   detailTitleRef.current = detailTitle;
-  const [secret, setSecret] = useState('');
   const [error, setError] = useState(false);
   const detailRequest = useRef(0);
   const followedTask = useRef('');
@@ -433,7 +432,6 @@ export function useGateway() {
               setControllerError('覆写已应用，但无法读取保存结果，请刷新重试');
             }
             controllerVersion.current = '';
-            setSecret('');
             break;
           }
           case 'check-updates': {
@@ -447,10 +445,6 @@ export function useGateway() {
             result = '更新检查完成';
             break;
           }
-          case 'view-secret':
-            setSecret(await readControllerSecret());
-            result = '密钥已读取';
-            break;
           case 'uninstall':
             result = await waitTask(await uninstallAgent(), observe);
             loaded.current = false;
@@ -637,8 +631,6 @@ export function useGateway() {
     error,
     showTask,
     refreshDetail,
-    secret,
-    setSecret,
   };
 }
 

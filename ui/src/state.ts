@@ -144,7 +144,6 @@ export type Action =
   | 'logs'
   | 'refresh'
   | 'diagnose'
-  | 'view-secret'
   | 'open-dashboard';
 
 export function parseState(text: string): DeviceState {
@@ -227,8 +226,7 @@ export function disabledReason(
   if (
     action === 'save-release-proxy' ||
     action === 'save-controller' ||
-    action === 'download-dashboard' ||
-    action === 'view-secret'
+    action === 'download-dashboard'
   )
     return '';
   if (action === 'open-dashboard') {
