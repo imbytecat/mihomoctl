@@ -87,11 +87,14 @@ func TestProcessIdentityRejectsStalePID(t *testing.T) {
 		if err := fsutil.WriteJSON(a.runtime("core.json"), host.Record{PID: os.Getpid(), Start: recorded}); err != nil {
 			t.Fatal(err)
 		}
-		process, alive := host.Owned(host.Record{PID: os.Getpid(), Start: recorded})
+		process, err := host.Owned(host.Record{PID: os.Getpid(), Start: recorded})
+		if err != nil {
+			t.Fatal(err)
+		}
 		if process != nil {
 			process.Release()
 		}
-		if alive != (recorded == start) {
+		if (process != nil) != (recorded == start) {
 			t.Fatal("PID ownership check failed")
 		}
 	}

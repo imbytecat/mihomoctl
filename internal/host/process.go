@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"strconv"
@@ -28,12 +29,39 @@ func Start(pid int) string {
 	return strconv.FormatUint(stat.Starttime, 10)
 }
 
-func Owned(record Record) (*os.Process, bool) {
-	if record.PID < 2 || record.Start == "" || Start(record.PID) != record.Start {
-		return nil, false
+func Owned(record Record) (*os.Process, error) {
+	if record.PID < 2 || record.Start == "" {
+		return nil, errors.New("invalid process identity")
+	}
+	proc, err := procfs.NewProc(record.PID)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	stat, err := proc.Stat()
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if stat.State == "Z" || strconv.FormatUint(stat.Starttime, 10) != record.Start {
+		return nil, nil
 	}
 	p, err := os.FindProcess(record.PID)
-	return p, err == nil && p.Signal(syscall.Signal(0)) == nil
+	if err != nil {
+		return nil, err
+	}
+	if err := p.Signal(syscall.Signal(0)); err != nil {
+		p.Release()
+		if errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return p, nil
 }
 
 func Command(ctx context.Context, files []*os.File, name string, args ...string) ([]byte, error) {

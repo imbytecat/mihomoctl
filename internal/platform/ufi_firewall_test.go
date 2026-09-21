@@ -25,7 +25,7 @@ func TestFirewallSelectionRespectsDefaultAndRequiresMatchingPair(t *testing.T) {
 		{"ambiguous explicit", map[string]string{"iptables-legacy": "legacy", "ip6tables-legacy": "legacy", "iptables-nft": "nf_tables", "ip6tables-nft": "nf_tables"}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := NewUFI(Environment{Run: func(_ context.Context, _ []*os.File, path string, args ...string) ([]byte, error) {
+			a := testUFI(Environment{Run: func(_ context.Context, _ []*os.File, path string, args ...string) ([]byte, error) {
 				if len(args) != 1 || args[0] != "--version" {
 					t.Fatal("selection must not inspect other proxies or write rules", args)
 				}
@@ -59,7 +59,7 @@ func TestFirewallBindingSurvivesPathChangesAndRejectsBackendChanges(t *testing.T
 		}
 	}
 	t.Setenv("PATH", tools)
-	a := NewUFI(Environment{Root: filepath.Join(dir, "mihomoctl")})
+	a := testUFI(Environment{Root: filepath.Join(dir, "mihomoctl")})
 	f, err := a.firewall(context.Background(), true)
 	if err != nil || f.Backend != "legacy" {
 		t.Fatal(f, err)
@@ -96,11 +96,11 @@ func TestFailedFirewallProbeDoesNotStartSupervisor(t *testing.T) {
 	if err := fsutil.WriteJSON(filepath.Join(root, "runtime", "firewall.json"), firewall{IPv4: "/fixture/iptables", IPv6: "/fixture/ip6tables", Backend: "legacy"}); err != nil {
 		t.Fatal(err)
 	}
-	a := NewUFI(Environment{Root: root, Executable: executable, Run: func(_ context.Context, _ []*os.File, _ string, args ...string) ([]byte, error) {
+	a := testUFI(Environment{Root: root, Executable: executable, Run: func(_ context.Context, _ []*os.File, _ string, args ...string) ([]byte, error) {
 		if args[len(args)-1] == "--version" {
 			return []byte("iptables v1.8.7 (legacy)"), nil
 		}
-		if args[2] == "check" {
+		if args[4] == "check" {
 			return []byte("TPROXY target unavailable"), errors.New("exit status 1")
 		}
 		return nil, nil
@@ -116,7 +116,7 @@ func TestFailedFirewallProbeDoesNotStartSupervisor(t *testing.T) {
 func TestOwnedRulesWithoutBindingNeverGuessBackend(t *testing.T) {
 	for _, marker := range []string{"network.owned", "network.active", "network.pending"} {
 		t.Run(marker, func(t *testing.T) {
-			a := NewUFI(Environment{Root: filepath.Join(t.TempDir(), "mihomoctl"), Run: func(context.Context, []*os.File, string, ...string) ([]byte, error) {
+			a := testUFI(Environment{Root: filepath.Join(t.TempDir(), "mihomoctl"), Run: func(context.Context, []*os.File, string, ...string) ([]byte, error) {
 				t.Fatal("queried a guessed backend for existing owned resources")
 				return nil, nil
 			}})

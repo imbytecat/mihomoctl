@@ -115,9 +115,33 @@ listeners_ready() {
   ' /proc/net/tcp /proc/net/udp /proc/net/tcp6 /proc/net/udp6 2>/dev/null
 }
 
+# Presence is read from the kernel, independently of the persisted transaction markers.
+network_residue() {
+  residue=false
+  for group in 'ipt mangle UFI_MH' 'ipt nat UFI_MH_DNS' 'ip6t filter UFI_MH6' 'ipt filter UFI_MH_IN' 'ip6t filter UFI_MH_IN6'; do
+    # shellcheck disable=SC2086
+    set -- $group
+    snapshot=$(table_snapshot "$1" "$2") || return 1
+    if printf '%s\n' "$snapshot" | grep -Eq "^-N ($3|${3}_A|${3}_B)$"; then residue=true; fi
+  done
+  route=$(network_state route-owned) || return 1
+  rule=$(network_state rule-owned) || return 1
+  if [ "$route" = true ] || [ "$rule" = true ]; then residue=true; fi
+  printf '%s\n' "$residue"
+}
+
+clear_network_records() {
+  rm -f "$DIR/network.active" "$DIR/network.pending" "$DIR/network.active.next" "$DIR/network.owned"
+}
+
 network_stop() {
-  [ -f "$DIR/network.owned" ] || return 0
   network_tools || return 1
+  if [ ! -f "$DIR/network.owned" ]; then
+    residue=$(network_residue) || return 1
+    [ "$residue" = false ] || { echo '存在同名网络资源但缺少所有权记录，拒绝清理' >&2; return 1; }
+    clear_network_records
+    return
+  fi
   for group in 'ipt mangle PREROUTING UFI_MH' 'ipt nat PREROUTING UFI_MH_DNS' 'ip6t filter FORWARD UFI_MH6' 'ipt filter INPUT UFI_MH_IN' 'ip6t filter INPUT UFI_MH_IN6'; do
     # shellcheck disable=SC2086
     set -- $group
@@ -146,7 +170,7 @@ network_stop() {
   if [ "$route" = true ] || [ "$rule" = true ]; then
     echo '网络路由未完全清理，保留运行文件' >&2; return 1
   fi
-  rm -f "$DIR/network.active" "$DIR/network.pending" "$DIR/network.active.next" "$DIR/network.owned"
+  clear_network_records
 }
 
 build_slot() {
@@ -325,10 +349,11 @@ case "$ACTION" in
     network_ok || { echo '本安装的网络规则或策略路由未就绪'; exit 1; }
     ;;
   inspect)
+    residue=$(network_residue) || exit 1
     listening=false; captured=false
     listeners_ready && listening=true
     if [ -n "$(active_interfaces)" ] && network_ok; then captured=true; fi
-    printf '{"listeners":%s,"network":%s}\n' "$listening" "$captured"
+    printf '{"listeners":%s,"network":%s,"capture":%s}\n' "$listening" "$captured" "$residue"
     ;;
   *) exit 1;;
 esac

@@ -47,6 +47,7 @@ function RuntimeSettings({ model }: { model: GatewayModel }) {
           }
         />
       </Row>
+      <div className="ufi:px-4"><Hint>停止代理不会关闭自启；关闭自启不会停止当前代理。</Hint></div>
       <SettingInput model={model} />
     </section>
   );

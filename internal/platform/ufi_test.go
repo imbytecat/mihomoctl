@@ -31,14 +31,14 @@ func TestUFIStartupReturnsReadinessLogsAndCleanupFailure(t *testing.T) {
 	if err := fsutil.WriteJSON(filepath.Join(root, "runtime", "firewall.json"), firewall{IPv4: "/system/bin/iptables", IPv6: "/system/bin/ip6tables", Backend: "legacy"}); err != nil {
 		t.Fatal(err)
 	}
-	a := NewUFI(Environment{Root: root, Executable: executable, Run: func(_ context.Context, _ []*os.File, _ string, args ...string) ([]byte, error) {
+	a := testUFI(Environment{Root: root, Executable: executable, Run: func(_ context.Context, _ []*os.File, _ string, args ...string) ([]byte, error) {
 		if args[len(args)-1] == "--version" {
 			return []byte("iptables v1.8.7 (legacy)"), nil
 		}
-		if args[2] == "check" {
+		if args[4] == "check" {
 			return nil, nil
 		}
-		if args[2] == "stop" {
+		if args[4] == "stop" {
 			stops++
 			if stops > 1 {
 				return []byte("cleanup route failed"), errors.New("exit status 1")
@@ -93,11 +93,11 @@ func TestUFIStartupListenConflictFailsBeforeReadinessTimeout(t *testing.T) {
 	if err := fsutil.WriteJSON(filepath.Join(root, "runtime", "firewall.json"), firewall{IPv4: "/fixture/iptables", IPv6: "/fixture/ip6tables", Backend: "legacy"}); err != nil {
 		t.Fatal(err)
 	}
-	a := NewUFI(Environment{Root: root, Executable: executable, Run: func(_ context.Context, _ []*os.File, _ string, args ...string) ([]byte, error) {
+	a := testUFI(Environment{Root: root, Executable: executable, Run: func(_ context.Context, _ []*os.File, _ string, args ...string) ([]byte, error) {
 		if args[len(args)-1] == "--version" {
 			return []byte("iptables v1.8.7 (legacy)"), nil
 		}
-		if args[2] == "ready" {
+		if args[4] == "ready" {
 			return []byte("controller listener missing"), errors.New("exit status 1")
 		}
 		return nil, nil
@@ -120,7 +120,7 @@ func TestUFIStartCancellationReapsItsChildWithoutAProcessRecord(t *testing.T) {
 	if err := fsutil.WriteJSON(filepath.Join(root, "runtime", "firewall.json"), firewall{IPv4: "/fixture/iptables", IPv6: "/fixture/ip6tables", Backend: "legacy"}); err != nil {
 		t.Fatal(err)
 	}
-	a := NewUFI(Environment{Root: root, Executable: executable, Run: func(_ context.Context, _ []*os.File, _ string, args ...string) ([]byte, error) {
+	a := testUFI(Environment{Root: root, Executable: executable, Run: func(_ context.Context, _ []*os.File, _ string, args ...string) ([]byte, error) {
 		if args[len(args)-1] == "--version" {
 			return []byte("iptables v1.8.7 (legacy)"), nil
 		}
@@ -166,7 +166,7 @@ func TestUFIStartCancellationReapsItsChildWithoutAProcessRecord(t *testing.T) {
 
 func TestUFIBootUsesTaskCLIWithQuotedPaths(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "device 'quoted'", "mihomoctl")
-	adapter := NewUFI(Environment{Root: root})
+	adapter := testUFI(Environment{Root: root})
 	if err := fsutil.AtomicWrite(filepath.Join(root, "mihomoctl"), []byte("#!/bin/sh\nprintf '%s\\n' \"$@\"\n"), 0700); err != nil {
 		t.Fatal(err)
 	}

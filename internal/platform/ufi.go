@@ -3,7 +3,6 @@ package platform
 import (
 	"context"
 	_ "embed"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -11,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -19,6 +19,7 @@ import (
 	"github.com/imbytecat/mihomoctl/internal/fsutil"
 	"github.com/imbytecat/mihomoctl/internal/host"
 	"github.com/imbytecat/mihomoctl/internal/redact"
+	"github.com/prometheus/procfs"
 )
 
 //go:embed network_ufi.sh
@@ -42,10 +43,11 @@ const UFIUploads = "/data/data/com.minikano.f50_sms/files/uploads"
 type UFIAdapter struct {
 	Environment
 	BootPath string
+	bootID   func() (string, error)
 }
 
 func NewUFI(env Environment) *UFIAdapter {
-	return &UFIAdapter{Environment: env, BootPath: "/sdcard/ufi_tools_boot.sh"}
+	return &UFIAdapter{Environment: env, BootPath: "/sdcard/ufi_tools_boot.sh", bootID: readBootID}
 }
 func (a *UFIAdapter) Config() Config { return Config{Kind: UFI} }
 func (a *UFIAdapter) Capabilities() Capabilities {
@@ -57,7 +59,7 @@ func (a *UFIAdapter) CertDirs() []string {
 	return []string{"/system/etc/security/cacerts", "/apex/com.android.conscrypt/cacerts"}
 }
 func (a *UFIAdapter) Prepare() error {
-	return fsutil.AtomicWrite(a.runtime("network.sh"), networkScript, 0700)
+	return os.MkdirAll(a.runtime(), 0700)
 }
 func (a *UFIAdapter) AttachTask(context.Context, int, string) error { return nil }
 func (a *UFIAdapter) Remove(ctx context.Context) error {
@@ -67,7 +69,16 @@ func (a *UFIAdapter) Remove(ctx context.Context) error {
 	return a.SetBoot(ctx, false)
 }
 func (a *UFIAdapter) Inspect(ctx context.Context) (State, error) {
-	s := State{Running: a.running(), Supervisor: a.alive("supervisor"), Capture: fsutil.RegularFile(a.runtime("network.active")) || fsutil.RegularFile(a.runtime("network.pending"))}
+	var s State
+	supervisor, err := a.alive("supervisor")
+	if err != nil {
+		return s, err
+	}
+	core, err := a.alive("core")
+	if err != nil {
+		return s, err
+	}
+	s.Running, s.Supervisor = core || supervisor, supervisor
 	if data, err := os.ReadFile(a.BootPath); err == nil {
 		for _, line := range strings.Split(string(data), "\n") {
 			if strings.TrimSpace(line) == a.BootLine() {
@@ -77,39 +88,72 @@ func (a *UFIAdapter) Inspect(ctx context.Context) (State, error) {
 	} else if !os.IsNotExist(err) {
 		return s, err
 	}
-	if !s.Running && !s.Capture {
+	if !s.Running && !a.hasNetworkState() {
 		return s, nil
 	}
-	fw, err := a.firewall(ctx, false)
-	if err != nil {
-		return s, nil
-	}
-	output, err := a.command(ctx, nil, "/system/bin/sh", a.runtime("network.sh"), a.runtime(), "inspect", fw.IPv4, fw.IPv6, a.Executable)
-	if err == nil {
-		var n struct{ Listeners, Network bool }
-		if json.Unmarshal(output, &n) == nil {
-			s.Listeners = n.Listeners
-			s.Network = n.Network
-		}
-	}
-	return s, nil
+	n, err := a.inspectNetwork(ctx)
+	s.Listeners, s.Network, s.Capture = n.Listeners, n.Network, n.Capture
+	return s, err
 }
-func (a *UFIAdapter) process(name string) (*os.Process, bool) {
-	var record host.Record
-	if fsutil.ReadJSON(a.runtime(name+".json"), &record) != nil {
-		return nil, false
+func (a *UFIAdapter) process(name string) (*os.Process, error) {
+	old, err := a.previousBoot()
+	if err != nil || old {
+		return nil, err
 	}
-	return host.Owned(record)
+	var record host.Record
+	if err := fsutil.ReadJSON(a.runtime(name+".json"), &record); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("无法读取 %s 进程记录：%w", name, err)
+	}
+	process, err := host.Owned(record)
+	if err != nil || process == nil {
+		return nil, err
+	}
+	proc, err := procfs.NewProc(record.PID)
+	if err != nil {
+		process.Release()
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	executable, err := proc.Executable()
+	if err != nil {
+		process.Release()
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	args, err := proc.CmdLine()
+	if err != nil {
+		process.Release()
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	want := []string{a.Executable, "supervise", "--root", a.Root}
+	if name == "core" {
+		want = []string{a.CorePath(), "-d", a.runtime(), "-f", a.runtime("current", "config.yaml")}
+	}
+	// An atomic Agent update can leave the still-running executable unlinked.
+	if strings.TrimSuffix(executable, " (deleted)") != want[0] || !slices.Equal(args, want) {
+		process.Release()
+		return nil, nil
+	}
+	return process, nil
 }
 
-func (a *UFIAdapter) alive(name string) bool {
-	process, alive := a.process(name)
+func (a *UFIAdapter) alive(name string) (bool, error) {
+	process, err := a.process(name)
 	if process != nil {
 		process.Release()
 	}
-	return alive
+	return process != nil, err
 }
-func (a *UFIAdapter) running() bool { return a.alive("core") || a.alive("supervisor") }
 
 func (a *UFIAdapter) network(ctx context.Context, action string) error {
 	ctx, cancel := context.WithTimeout(ctx, 40*time.Second)
@@ -130,7 +174,32 @@ func (a *UFIAdapter) network(ctx context.Context, action string) error {
 	if err != nil {
 		return err
 	}
-	output, err := a.command(ctx, []*os.File{lock}, "/system/bin/sh", a.runtime("network.sh"), a.runtime(), action, fw.IPv4, fw.IPv6, a.Executable)
+	old, err := a.previousBoot()
+	if err != nil {
+		return err
+	}
+	if old {
+		n, err := a.inspectNetwork(ctx)
+		if err != nil {
+			return err
+		}
+		if n.Capture {
+			return errors.New("上次开机的记录不能证明当前网络规则的所有权，保留现场")
+		}
+		if err := a.removeRuntimeFiles("network.owned", "network.active", "network.pending", "network.active.next"); err != nil {
+			return err
+		}
+	}
+	if action == "check" || action == "prepare" {
+		boot, err := a.bootID()
+		if err != nil {
+			return err
+		}
+		if err := fsutil.AtomicWrite(a.runtime("boot_id"), []byte(boot), 0600); err != nil {
+			return err
+		}
+	}
+	output, err := a.runNetwork(ctx, []*os.File{lock}, action, fw)
 	if err != nil {
 		return fmt.Errorf("网络规则 %s 失败（%s，%s / %s）：%w\n%s", action, fw.Backend, fw.IPv4, fw.IPv6, err, redact.String(string(output)))
 	}
@@ -138,11 +207,14 @@ func (a *UFIAdapter) network(ctx context.Context, action string) error {
 }
 
 func (a *UFIAdapter) stopProcess(name string) error {
-	p, alive := a.process(name)
+	p, err := a.process(name)
+	if err != nil {
+		return err
+	}
 	if p != nil {
 		defer p.Release()
 	}
-	if !alive {
+	if p == nil {
 		return nil
 	}
 	if err := p.Signal(syscall.SIGTERM); err != nil && !errors.Is(err, os.ErrProcessDone) {
@@ -150,9 +222,9 @@ func (a *UFIAdapter) stopProcess(name string) error {
 	}
 	for i := 0; i < 50; i++ {
 		time.Sleep(100 * time.Millisecond)
-		q, live := a.process(name)
-		if q != nil {
-			q.Release()
+		live, err := a.alive(name)
+		if err != nil {
+			return err
 		}
 		if !live {
 			return nil
@@ -162,7 +234,11 @@ func (a *UFIAdapter) stopProcess(name string) error {
 		return err
 	}
 	for i := 0; i < 50; i++ {
-		if !a.alive(name) {
+		live, err := a.alive(name)
+		if err != nil {
+			return err
+		}
+		if !live {
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -177,12 +253,12 @@ func (a *UFIAdapter) Stop(_ context.Context) error {
 	if err := a.stopProcess("core"); err != nil {
 		return err
 	}
-	if fsutil.RegularFile(a.runtime("network.owned")) {
+	if a.hasNetworkState() {
 		if err := a.network(context.Background(), "stop"); err != nil {
 			return err
 		}
 	}
-	return nil
+	return a.removeRuntimeFiles("core.json", "core.pid", "supervisor.json", "boot_id", "network.sh")
 }
 
 func (a *UFIAdapter) Start(ctx context.Context, options StartOptions) error {
@@ -190,9 +266,6 @@ func (a *UFIAdapter) Start(ctx context.Context, options StartOptions) error {
 		return err
 	}
 	if err := a.Stop(context.Background()); err != nil {
-		return err
-	}
-	if err := fsutil.AtomicWrite(a.runtime("network.sh"), networkScript, 0700); err != nil {
 		return err
 	}
 	if err := a.network(ctx, "check"); err != nil {
@@ -217,7 +290,9 @@ func (a *UFIAdapter) Start(ctx context.Context, options StartOptions) error {
 	var exitErr error
 	var readyErr error
 	failure := func(cause error) error {
-		state := fmt.Errorf("失败时状态（清理前）：守护进程存活=%t，内核存活=%t", a.alive("supervisor"), a.alive("core"))
+		sup, supErr := a.alive("supervisor")
+		core, coreErr := a.alive("core")
+		state := errors.Join(fmt.Errorf("失败时状态（清理前）：守护进程存活=%t，内核存活=%t", sup, core), supErr, coreErr)
 		if readyErr == nil {
 			probe, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			readyErr = a.network(probe, "ready")
@@ -281,8 +356,11 @@ func (a *UFIAdapter) Start(ctx context.Context, options StartOptions) error {
 			return failure(err)
 		}
 		readyErr = a.network(ctx, "ready")
-		if readyErr == nil && !a.alive("supervisor") {
-			readyErr = errors.New("守护进程记录不可验证")
+		if readyErr == nil {
+			alive, err := a.alive("supervisor")
+			if !alive || err != nil {
+				readyErr = errors.Join(errors.New("守护进程记录不可验证"), err)
+			}
 		}
 		if readyErr == nil {
 			stable++
@@ -315,6 +393,20 @@ func (a *UFIAdapter) supervise(ctx context.Context) error {
 	defer lock.Close()
 	if err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		return errors.New("守护进程已运行")
+	}
+	old, err := a.previousBoot()
+	if err != nil {
+		return err
+	}
+	if old {
+		return errors.New("需要通过 start 清理上次开机的运行记录")
+	}
+	boot, err := a.bootID()
+	if err != nil {
+		return err
+	}
+	if err := fsutil.AtomicWrite(a.runtime("boot_id"), []byte(boot), 0600); err != nil {
+		return err
 	}
 	if err = fsutil.WriteJSON(a.runtime("supervisor.json"), host.Record{PID: os.Getpid(), Start: host.Start(os.Getpid())}); err != nil {
 		return err

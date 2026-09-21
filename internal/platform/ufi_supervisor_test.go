@@ -34,11 +34,11 @@ func TestUFISupervisorRetriesAndStopsOwnedChild(t *testing.T) {
 			}
 			var prepares, syncs, stops atomic.Int32
 			var pidAtCleanup atomic.Int32
-			p := NewUFI(Environment{Root: root, Run: func(_ context.Context, _ []*os.File, _ string, args ...string) ([]byte, error) {
+			p := testUFI(Environment{Root: root, Run: func(_ context.Context, _ []*os.File, _ string, args ...string) ([]byte, error) {
 				if args[len(args)-1] == "--version" {
 					return []byte("iptables v1.8.7 (legacy)"), nil
 				}
-				switch args[2] {
+				switch args[4] {
 				case "prepare":
 					if prepares.Add(1) == 1 && mode == "prepare-and-crash" {
 						return []byte("temporary prepare failure"), errors.New("exit status 1")

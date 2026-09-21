@@ -294,6 +294,36 @@ test('firewall probe uses unhooked rules and cleanup never treats failed reads a
   expect(await readFile(join(dir, 'fw-4-filter-OTHER'), 'utf8')).toBe('-j RETURN\n');
 });
 
+test('reboot residue is kernel evidence, and unowned or unreadable resources never grant cleanup', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'mihomoctl-reboot-'));
+  temporary.push(dir);
+  for (const name of ['routes', 'rules', 'network.owned', 'network.pending', 'fw-4-mangle-PREROUTING', 'fw-4-nat-PREROUTING', 'fw-4-filter-INPUT', 'fw-6-filter-INPUT', 'fw-6-filter-FORWARD'])
+    await writeFile(join(dir, name), '');
+  await writeFile(join(dir, 'network.active'), 'A\nwlan0\n');
+  const source = await networkFunctions();
+  const harness = await readFile('tests/fake-net.sh', 'utf8');
+  const run = (action: string) => spawnSync('sh', ['-c', `DIR=${quote(dir)}\n${source}\n${harness}\n${action}`], { encoding: 'utf8', timeout: 10_000 });
+  expect(run('network_residue').stdout.trim()).toBe('false');
+  expect(existsSync(join(dir, 'network.active'))).toBe(true);
+  await writeFile(join(dir, 'fw-6-filter-UFI_MH_IN6_B'), '-j REJECT\n');
+  expect(run('network_residue').stdout.trim()).toBe('true');
+  await rm(join(dir, 'fw-6-filter-UFI_MH_IN6_B'));
+  await writeFile(join(dir, 'rules'), '9000: from all fwmark 0x40000000/0x40000000 lookup 2026\n');
+  expect(run('network_residue').stdout.trim()).toBe('true');
+  await rm(join(dir, 'network.owned'));
+  expect(run('network_stop').status).toBe(1);
+  expect(await readFile(join(dir, 'rules'), 'utf8')).not.toBe('');
+  await writeFile(join(dir, 'rules'), '');
+  await writeFile(join(dir, 'fail-query'), '');
+  expect(run('network_residue').status).toBe(1);
+  expect(run('network_stop').status).toBe(1);
+  expect(existsSync(join(dir, 'network.active'))).toBe(true);
+  await rm(join(dir, 'fail-query'));
+  expect(run('network_stop').status).toBe(0);
+  expect(existsSync(join(dir, 'network.active'))).toBe(false);
+  expect(existsSync(join(dir, 'network.pending'))).toBe(false);
+});
+
 test('built plugin is one classic script with HTML-safe boundaries', async () => {
   const output = await readFile('dist/mihomoctl-ufi.js', 'utf8');
   expect(output.startsWith('//<script>')).toBe(true);

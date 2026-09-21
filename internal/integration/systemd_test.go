@@ -166,11 +166,28 @@ func TestSystemdDeployment(t *testing.T) {
 			if output, err = exec.Command("systemctl", "is-enabled", name).CombinedOutput(); err != nil || strings.TrimSpace(string(output)) != "enabled" {
 				t.Fatalf("autostart was not enabled: %s %v", output, err)
 			}
+			if output, err = run("", "stop"); err != nil {
+				t.Fatalf("stop enabled service: %s %v", output, err)
+			}
+			time.Sleep(6 * time.Second) // Longer than RestartSec; an explicit stop must stay stopped.
+			output, err = run("", "status")
+			var stopped struct{ Running, Boot bool }
+			if err != nil || json.Unmarshal(output, &stopped) != nil || stopped.Running || !stopped.Boot {
+				t.Fatalf("stop changed boot policy or restarted: %s %v", output, err)
+			}
+			if output, err = run("", "start"); err != nil {
+				t.Fatalf("start enabled service: %s %v", output, err)
+			}
 		}
 		if action == "boot-off" {
 			output, _ = exec.Command("systemctl", "is-enabled", name).CombinedOutput()
 			if strings.TrimSpace(string(output)) != "linked" {
 				t.Fatalf("disabled unit lost its managed link: %s", output)
+			}
+			output, err = run("", "status")
+			var disabled struct{ Running, Boot bool }
+			if err != nil || json.Unmarshal(output, &disabled) != nil || !disabled.Running || disabled.Boot {
+				t.Fatalf("disable stopped active service: %s %v", output, err)
 			}
 		}
 	}
