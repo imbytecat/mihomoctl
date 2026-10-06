@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { app, evaluate, idle, open, closeModal } from './app';
+import { app, evaluate, idle, open, leaveLogs } from './app';
 
 test('uninstall remains usable when the entire status response is unreadable', async () => {
   await open('unreadable-state');
@@ -29,7 +29,7 @@ test('failed cleanup preserves the uninstall entry and reports the actual failur
   expect(evaluate('mockDeviceState.agent && mockDeviceState.service')).toBe(true);
   await app.getByRole('button', { name: '查看错误详情', exact: true }).click();
   await expect.element(app.getByCSS('[data-output]')).toMatchTextContent('无法清理自启脚本');
-  await closeModal();
+  await leaveLogs();
   await expect.element(app.getByRole('button', { name: '卸载现有安装', exact: true })).toBeEnabled();
 });
 

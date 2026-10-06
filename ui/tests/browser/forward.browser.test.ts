@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { app, evaluate, idle, open, reload } from './app';
+import { app, evaluate, idle, open, reload, expand } from './app';
 
 test('custom forwarding is used before installation and restored from the device', async () => {
   await open('missing-service');
@@ -23,7 +23,7 @@ test('custom forwarding is used before installation and restored from the device
   ]);
   expect(evaluate('mockCommands.some(c => c.includes("https://mirror.example.com/https%3A%2F%2Fgithub.com"))')).toBe(true);
   await reload();
-  await app.getByCSS('[data-plugin] > summary').click();
+  await expand();
   await idle();
   await app.getByRole('tab', { name: '设置', exact: true }).click();
   await expect.element(input).toHaveValue('https://mirror.example.com');
@@ -46,7 +46,7 @@ test('saving forwarding preserves newer edits, survives refresh and can restore 
   await expect.poll(() => evaluate('mockDeviceState.settings.releaseProxy')).toBe('https://new.example.com');
   await idle();
   await reload();
-  await app.getByCSS('[data-plugin] > summary').click();
+  await expand();
   await idle();
   await app.getByRole('tab', { name: '设置', exact: true }).click();
   await expect.element(input).toHaveValue('https://new.example.com');

@@ -1,25 +1,38 @@
 import { useRef, useState } from 'react';
 import { Tabs } from '@base-ui/react/tabs';
 import { createPortal } from 'react-dom';
-import { ChevronDown, ShieldCheck } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import { Toaster } from 'sonner';
 import { useGateway } from './use-gateway';
-import { topTask } from './state';
-import { Overview, runtimeTitle, stageOf } from './components/Overview';
+import { Overview, StatusDot, runtimeTitle } from './components/Overview';
 import { Settings } from './components/Settings';
-import { Subscription } from './components/Subscription';
-import { TaskNotice } from './components/TaskNotice';
+import { Config } from './components/Config';
 import { LogPanel } from './components/LogPanel';
-import { Button, Modal, focus } from './components/ui';
+import { Button, Modal, Segmented, focus, muted } from './components/ui';
+
+const tabs = [
+  ['config', '配置'],
+  ['settings', '设置'],
+  ['logs', '日志'],
+] as const;
+const openKey = 'mihomoctl-open';
 
 export default function Gateway({ container }: { container: HTMLElement }) {
   const model = useGateway();
-  const [tab, setTab] = useState('overview');
+  const [initiallyOpen] = useState(() => {
+    // Remember whether the user left the plugin expanded; polling only runs while open.
+    const value = localStorage.getItem(openKey) === '1';
+    model.open.current = value;
+    return value;
+  });
+  const [tab, setTab] = useState('config');
   const [uninstallOpen, setUninstallOpen] = useState(false);
   const subscription = useRef<HTMLDivElement>(null);
-  const setup = ['unknown', 'agent', 'service', 'core'].includes(
-    stageOf(model),
-  );
+  const show = (value: string, target: () => void) => {
+    setTab(value);
+    model.setDetailOpen(false);
+    requestAnimationFrame(target);
+  };
 
   return (
     <>
@@ -35,86 +48,71 @@ export default function Gateway({ container }: { container: HTMLElement }) {
         />,
         container,
       )}
+      {/* Container query: layout follows the plugin's own width, not the viewport. Containment and
+          backdrop-filter trap fixed descendants, so the fullscreen log viewer portals out. */}
       <details
         data-plugin
-        className="ufi:group/plugin ufi:overflow-hidden ufi:rounded-[22px] ufi:border ufi:border-solid ufi:border-[var(--mh-line)] ufi:bg-[var(--mh-bg)] ufi:text-[var(--mh-text)]"
+        open={initiallyOpen}
+        className="ufi:group/plugin ufi:@container ufi:rounded-[22px] ufi:border ufi:border-solid ufi:border-[var(--mh-line)] ufi:bg-[var(--mh-bg)] ufi:text-[var(--mh-text)] ufi:shadow-lg ufi:backdrop-blur-(--mh-blur)"
         onToggle={(event) => {
-          if (event.target === event.currentTarget)
-            model.open.current = event.currentTarget.open;
+          if (event.target !== event.currentTarget) return;
+          model.open.current = event.currentTarget.open;
+          localStorage.setItem(openKey, event.currentTarget.open ? '1' : '0');
         }}
       >
         <summary
-          className={`ufi:flex ufi:list-none ufi:items-center ufi:gap-3 ufi:px-5 ufi:py-4 ufi:cursor-pointer ufi:[&::-webkit-details-marker]:hidden ${focus}`}
+          className={`ufi:flex ufi:min-h-14 ufi:cursor-pointer ufi:list-none ufi:items-center ufi:gap-3 ufi:rounded-[22px] ufi:px-5 ufi:select-none ufi:[&::-webkit-details-marker]:hidden ${focus}`}
         >
-          <ShieldCheck size={22} className="ufi:text-[#0a84ff]" aria-hidden />
+          <StatusDot model={model} />
           <strong className="ufi:text-base ufi:font-semibold">Mihomo</strong>
-          <span className="ufi:ml-auto ufi:text-xs ufi:opacity-65">
+          <span className={`ufi:ml-auto ufi:text-sm ufi:transition-opacity ufi:group-open/plugin:opacity-0 ${muted}`}>
             {runtimeTitle(model)}
           </span>
           <ChevronDown
-            size={17}
-            className="ufi:group-open/plugin:rotate-180"
+            size={18}
+            className={`ufi:shrink-0 ufi:transition-transform ufi:duration-200 ufi:group-open/plugin:rotate-180 ${muted}`}
             aria-hidden
           />
         </summary>
         <div
           data-gateway-body
           aria-busy={!!model.busy}
-          className="ufi:px-4 ufi:pb-4"
+          className="ufi:flex ufi:flex-col ufi:gap-4 ufi:px-3 ufi:pb-3 ufi:@sm:px-4 ufi:@sm:pb-4 ufi:@4xl:grid ufi:@4xl:grid-cols-[minmax(18rem,24rem)_minmax(0,1fr)] ufi:@4xl:items-start ufi:@4xl:gap-5"
         >
-          <Overview
-            model={model}
-            container={container}
-            confirmUninstall={() => setUninstallOpen(true)}
-            addSubscription={() => {
-              setTab('overview');
-              model.setDetailOpen(false);
-              requestAnimationFrame(() => {
-                subscription.current?.scrollIntoView({
-                  block: 'center',
-                  behavior: 'smooth',
-                });
-                model.form.setFocus('subscription');
-              });
+          <div className="ufi:@4xl:sticky ufi:@4xl:top-4">
+            <Overview
+              model={model}
+              confirmUninstall={() => setUninstallOpen(true)}
+              openSettings={() =>
+                show('settings', () => document.getElementById('ufi-release-proxy')?.focus())
+              }
+              addSubscription={() =>
+                show('config', () => {
+                  subscription.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                  model.form.setFocus('subscription');
+                })
+              }
+            />
+          </div>
+          <Tabs.Root
+            value={model.detailOpen ? 'logs' : tab}
+            onValueChange={(value) => {
+              if (value === 'logs') model.setDetailOpen(true);
+              else {
+                setTab(String(value));
+                model.setDetailOpen(false);
+              }
             }}
-          />
-          {model.error ? (
-            <div className="ufi:mt-3">
-              <Button
-                full
-                variant="danger"
-                onClick={() => { model.setLogSource('details'); model.setDetailOpen(true); }}
-              >
-                查看错误详情
-              </Button>
-            </div>
-          ) : (
-            topTask(model.task) &&
-            model.task && (
-              <TaskNotice model={model} job={model.task} />
-            )
-          )}
-          <Tabs.Root value={model.detailOpen ? 'logs' : tab} onValueChange={(value) => {
-            if (value === 'logs') {
-              model.setDetailOpen(true);
-            }
-            else { setTab(String(value)); model.setDetailOpen(false); }
-          }} className="ufi:mt-4">
-            <Tabs.List aria-label="Mihomo 功能" className="ufi:flex ufi:gap-1 ufi:rounded-xl ufi:bg-[var(--mh-group)] ufi:p-1">
-              {([['overview', '概览'], ['settings', '设置'], ['logs', '日志']] as const).map(([value, label]) => (
-                <Tabs.Tab key={value} value={value} className={`ufi:m-0 ufi:min-h-11 ufi:min-w-0 ufi:flex-1 ufi:rounded-lg ufi:border-0 ufi:bg-none ufi:bg-transparent ufi:px-3 ufi:text-sm ufi:font-medium ufi:text-[var(--mh-text)] ufi:cursor-pointer ufi:data-[active]:bg-[#0a84ff] ufi:data-[active]:text-white ${focus}`}>
-                  {label}
-                </Tabs.Tab>
-              ))}
-            </Tabs.List>
-            <Tabs.Panel value="overview" keepMounted className="ufi:data-[hidden]:hidden">
-              <Subscription model={model} anchor={subscription} />
+          >
+            <Segmented label="Mihomo 功能" items={tabs} className="ufi:mb-4" />
+            <Tabs.Panel value="config" keepMounted className="ufi:data-[hidden]:hidden">
+              <Config model={model} anchor={subscription} />
             </Tabs.Panel>
             <Tabs.Panel value="settings" keepMounted className="ufi:data-[hidden]:hidden">
-              <Settings model={model} setup={setup} confirmUninstall={() => setUninstallOpen(true)} />
+              <Settings model={model} confirmUninstall={() => setUninstallOpen(true)} />
             </Tabs.Panel>
             <Tabs.Panel value="logs" keepMounted className="ufi:data-[hidden]:hidden">
-              <LogPanel model={model} />
+              <LogPanel model={model} portal={container} />
             </Tabs.Panel>
           </Tabs.Root>
         </div>
@@ -128,7 +126,7 @@ export default function Gateway({ container }: { container: HTMLElement }) {
         description="停止代理并关闭开机启动，删除本安装的 mihomoctl、内核和全部数据，不可恢复。"
         closeLabel="取消卸载"
       >
-        <div className="ufi:flex ufi:justify-end ufi:gap-3">
+        <div className="ufi:flex ufi:justify-end ufi:gap-2">
           <Button data-uninstall-cancel onClick={() => setUninstallOpen(false)}>
             取消
           </Button>

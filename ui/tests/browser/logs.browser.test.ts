@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { app, evaluate, idle, open, reload } from './app';
+import { app, evaluate, idle, open, reload, expand } from './app';
 
 const output = () => app.getByCSS('[data-output]');
 const source = (name: string) => app.getByRole('tablist', { name: '日志来源' }).getByRole('tab', { name, exact: true }).click();
@@ -22,7 +22,7 @@ test('separate log sources accumulate automatically across tabs, pause and recon
   await app.getByRole('button', { name: '继续收集', exact: true }).click();
   await expect.element(output()).toMatchTextContent('core second');
   await expect.element(output()).toMatchTextContent('core first');
-  await app.getByRole('tab', { name: '概览', exact: true }).click();
+  await app.getByRole('tab', { name: '配置', exact: true }).click();
   await evaluate('mockRuntimeLog += "\\nbackground line"');
   await expect.poll(() => evaluate('document.querySelector("[data-output]").textContent.includes("background line")')).toBe(true);
   await app.getByRole('tab', { name: '日志', exact: true }).click();
@@ -81,7 +81,7 @@ test('startup streams kernel output before completion and reconnects without res
   await expect.element(app.getByCSS('[data-output] [data-log-level=error]').last()).toHaveStyle({ color: 'rgb(255, 105, 97)' });
   expect(evaluate('mockDeviceState.task.state')).toBe('running');
   await reload();
-  await app.getByCSS('[data-plugin] > summary').click();
+  await expand();
   await expect.element(app.getByRole('tab', { name: '日志', exact: true })).toHaveAttribute('aria-selected', 'true');
   await evaluate('mockRuntimeLog = "Kernel output after reconnect"');
   await expect.element(output()).toMatchTextContent('Kernel output after reconnect');
@@ -95,7 +95,13 @@ test('viewer provides ANSI colors, safe literal HTML and built-in search', async
   await expect.element(output()).toMatchTextContent('<script>literal text</script>');
   await expect.element(app.getByCSS('[data-output] script')).not.toBeInTheDocument();
   await expect.element(app.getByCSS('[data-output] span[style*=color]')).toMatchTextContent('ANSI red');
-  await app.getByCSS('[data-output] input').fill('ANSI red');
+  await app.getByRole('searchbox', { name: '搜索日志' }).fill('ANSI red');
   await expect.element(output()).not.toMatchTextContent('literal text');
   await expect.element(output()).toMatchTextContent('ANSI red');
+  await app.getByRole('searchbox', { name: '搜索日志' }).fill('');
+  await evaluate(`mockRuntimeLog += ${JSON.stringify('\ntime="2026-10-06T17:39:40.123456789+08:00" level=warning msg="say \\"hi\\"" proxy=HK')}`);
+  await expect.element(output()).toMatchTextContent('17:39:40warnsay "hi" proxy=HK');
+  await app.getByRole('button', { name: '只看警告和错误', exact: true }).click();
+  await expect.element(output()).not.toMatchTextContent('literal text');
+  await expect.element(output()).toMatchTextContent('say "hi"');
 });

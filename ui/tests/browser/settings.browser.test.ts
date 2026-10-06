@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import { userEvent } from 'vitest/browser';
-import { app, evaluate, idle, closeModal, open, reload } from './app';
+import { app, evaluate, idle, leaveLogs, open, reload, expand, yamlText } from './app';
 
 const panelYaml = (port: number, extra = '') => `external-controller: 0.0.0.0:${port}\n${extra}`;
 
@@ -36,16 +36,17 @@ test('unsaved drafts cancel navigation with the current browser event API', asyn
   await open('ready');
   const canLeave = () => evaluate('window.dispatchEvent(new Event("beforeunload", { cancelable: true }))');
   expect(canLeave()).toBe(true);
+  await app.getByRole('button', { name: '更换链接', exact: true }).click();
   await app.getByCSS('[data-url]').fill('https://draft.example/subscription');
   expect(canLeave()).toBe(false);
-  await app.getByRole('tab', { name: '设置', exact: true }).click();
-  const initialYaml = (app.getByCSS('#ufi-controller-yaml').element() as HTMLTextAreaElement).value;
+  await app.getByRole('tab', { name: '配置', exact: true }).click();
+  const initialYaml = yamlText();
   await app.getByCSS('#ufi-controller-yaml').fill(panelYaml(9191));
   await app.getByRole('tab', { name: '日志', exact: true }).click();
-  await app.getByRole('tab', { name: '设置', exact: true }).click();
-  await expect.element(app.getByCSS('#ufi-controller-yaml')).toHaveValue(panelYaml(9191));
+  await app.getByRole('tab', { name: '配置', exact: true }).click();
+  await expect.poll(yamlText).toBe(panelYaml(9191));
   await app.getByCSS('#ufi-controller-yaml').fill(initialYaml);
-  await app.getByRole('tab', { name: '概览', exact: true }).click();
+  await app.getByRole('tab', { name: '配置', exact: true }).click();
   await expect.element(app.getByCSS('[data-url]')).toHaveValue('https://draft.example/subscription');
   await app.getByCSS('[data-url]').fill('');
   expect(canLeave()).toBe(true);
@@ -94,11 +95,11 @@ test('interface autosave preserves newer drafts and handles failures', async () 
 
 test('controller transactions, encrypted secrets and task details', async () => {
   await open('running');
-  await app.getByRole('tab', { name: '设置', exact: true }).click();
+  await app.getByRole('tab', { name: '配置', exact: true }).click();
   await app.getByCSS('#ufi-controller-yaml').fill('external-controller: [\n');
   await app.getByCSS('[data-action=save-controller]').click();
   await idle();
-  await app.getByRole('tab', { name: '设置', exact: true }).click();
+  await app.getByRole('tab', { name: '配置', exact: true }).click();
   await expect.element(app.getByCSS('#ufi-controller-yaml-error')).toBeVisible();
   expect(evaluate('mockIntents.length')).toBe(0);
   await openDashboard(9090, 'mock-controller-key-not-a-real-secret');
@@ -116,18 +117,14 @@ test('controller transactions, encrypted secrets and task details', async () => 
     .toBeTruthy();
   await idle();
   await openDashboard(9191, 'short');
-  await expect.element(app.getByCSS('#ufi-controller-yaml')).toHaveValue(panelYaml(9393, 'secret: newer-draft-secret\n'));
-  await app.getByRole('button', { name: '更多操作', exact: true }).click();
-  await app.getByRole('menuitem', { name: '运行日志', exact: true }).click();
-  await expect
-    .element(app.getByCSS('[data-log-panel]'))
-    .toBeVisible();
+  await expect.poll(yamlText).toBe(panelYaml(9393, 'secret: newer-draft-secret\n'));
+  await app.getByRole('tab', { name: '日志', exact: true }).click();
+  const sources = app.getByRole('tablist', { name: '日志来源' });
+  await sources.getByRole('tab', { name: 'Mihomo', exact: true }).click();
   await expect
     .element(app.getByCSS('[data-log-source]'))
     .toHaveTextContent('Mihomo');
-  await closeModal();
-  await app.getByRole('button', { name: '更多操作', exact: true }).click();
-  await app.getByRole('menuitem', { name: '最近任务', exact: true }).click();
+  await sources.getByRole('tab', { name: '详情', exact: true }).click();
   await expect
     .element(app.getByCSS('[data-log-panel]'))
     .toBeVisible();
@@ -140,7 +137,7 @@ test('controller transactions, encrypted secrets and task details', async () => 
   await expect
     .element(app.getByCSS('[data-output]'))
     .not.toMatchTextContent('core.log');
-  await closeModal();
+  await leaveLogs('配置');
   await evaluate(
     'window.mockTaskDelayMs = 300; window.mockTaskFailure = "配置校验失败"',
   );
@@ -151,7 +148,7 @@ test('controller transactions, encrypted secrets and task details', async () => 
     .toBeTruthy();
   await idle();
   expect(evaluate('mockDeviceState.controller.port')).toBe(9191);
-  await expect.element(app.getByCSS('#ufi-controller-yaml')).toHaveValue(panelYaml(9292));
+  await expect.poll(yamlText).toBe(panelYaml(9292));
 });
 
 test('dashboard handles blocked popups, failed secret reads and encoded credentials', async () => {
@@ -170,7 +167,7 @@ test('dashboard handles blocked popups, failed secret reads and encoded credenti
   await idle();
 
   await evaluate('window.mockSecretFailure = false');
-  await app.getByRole('tab', { name: '设置', exact: true }).click();
+  await app.getByRole('tab', { name: '配置', exact: true }).click();
   const key = 'key &#+%?中文';
   await app.getByCSS('#ufi-controller-yaml').fill(panelYaml(9191, `secret: ${JSON.stringify(key)}\n`));
   await app.getByCSS('[data-action=save-controller]').click();
@@ -180,6 +177,7 @@ test('dashboard handles blocked popups, failed secret reads and encoded credenti
 
 test('update checks show component results without submitting mutations or clearing drafts', async () => {
   await open('ready');
+  await app.getByRole('button', { name: '更换链接', exact: true }).click();
   await app.getByCSS('[data-url]').fill('https://draft.example/subscription');
   await app.getByRole('tab', { name: '设置', exact: true }).click();
   await app.getByRole('button', { name: '检查更新', exact: true }).click();
@@ -223,7 +221,7 @@ test('update checks show component results without submitting mutations or clear
     ),
   ).toBe(true);
   await reload();
-  await app.getByCSS('[data-plugin] > summary').click();
+  await expand();
   await idle();
   await app.getByRole('tab', { name: '设置', exact: true }).click();
   await expect
@@ -255,7 +253,7 @@ test('install after checking updates immediately disables redundant component up
   expect(evaluate('mockDeviceState.updates.checkedAt')).toBe(checked);
   expect(evaluate('mockCommands.filter(c => c.includes("check-updates")).length')).toBe(1);
   await reload();
-  await app.getByCSS('[data-plugin] > summary').click();
+  await expand();
   await idle();
   await app.getByRole('tab', { name: '设置', exact: true }).click();
   await expect.element(app.getByCSS('[data-group=maintenance] [data-action=download]')).toBeDisabled();
@@ -265,9 +263,9 @@ test('install after checking updates immediately disables redundant component up
 
 test('restoring override defaults is a draft edit and preserves newer typing during save', async () => {
   await open('ready');
-  await app.getByRole('tab', { name: '设置', exact: true }).click();
+  await app.getByRole('tab', { name: '配置', exact: true }).click();
   const editor = app.getByCSS('#ufi-controller-yaml');
-  const original = (editor.element() as HTMLTextAreaElement).value;
+  const original = yamlText();
   await evaluate('mockTaskDelayMs = 2500');
   await editor.fill(panelYaml(9191, 'future-option: true\n'));
   await app.getByCSS('[data-action=save-controller]').click();
@@ -275,12 +273,12 @@ test('restoring override defaults is a draft edit and preserves newer typing dur
   await editor.fill(original);
   await idle();
   expect(evaluate('mockDeviceState.controller.port')).toBe(9191);
-  await expect.element(editor).toHaveValue(original);
+  await expect.poll(yamlText).toBe(original);
   expect(evaluate('window.dispatchEvent(new Event("beforeunload", { cancelable: true }))')).toBe(false);
   const submitted = evaluate('mockIntents.length');
   await editor.fill('secret: [\n');
   await app.getByRole('button', { name: '恢复默认', exact: true }).click();
-  await expect.element(editor).toHaveValue('');
+  await expect.poll(yamlText).toBe('');
   await expect.element(editor).toHaveAttribute('aria-invalid', 'false');
   expect(evaluate('mockIntents.length')).toBe(submitted);
   await app.getByCSS('[data-action=save-controller]').click();
@@ -288,13 +286,13 @@ test('restoring override defaults is a draft edit and preserves newer typing dur
   const newerDraft = panelYaml(9393, 'future-option: newer\n');
   await editor.fill(newerDraft);
   await idle();
-  await expect.element(editor).toHaveValue(newerDraft);
+  await expect.poll(yamlText).toBe(newerDraft);
   expect(evaluate('mockDeviceState.controller.port')).toBe(9191);
   await app.getByRole('button', { name: '恢复默认', exact: true }).click();
   await app.getByCSS('[data-action=save-controller]').click();
   await idle();
-  await expect.element(editor).toHaveValue(expect.stringContaining('external-controller: 0.0.0.0:9191'));
-  await expect.element(editor).toHaveValue(expect.stringContaining('mock-controller-key-not-a-real-secret'));
-  await expect.element(editor).not.toHaveValue(expect.stringContaining('future-option'));
+  await expect.poll(yamlText).toContain('external-controller: 0.0.0.0:9191');
+  await expect.poll(yamlText).toContain('mock-controller-key-not-a-real-secret');
+  await expect.poll(yamlText).not.toContain('future-option');
   expect(evaluate('mockCommands.every(c => !c.includes("mock-controller-key-not-a-real-secret"))')).toBe(true);
 });

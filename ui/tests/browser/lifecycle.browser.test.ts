@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { app, evaluate, idle, closeModal, open, reload } from './app';
+import { app, evaluate, idle, leaveLogs, open, reload, expand } from './app';
 
 test('install, encrypted subscription, runtime, autostart and uninstall', async () => {
   await open('missing-service');
@@ -15,7 +15,7 @@ test('install, encrypted subscription, runtime, autostart and uninstall', async 
     .element(app.getByCSS('[data-version=core]'))
     .toHaveTextContent('v9.8.7');
   await idle();
-  await app.getByRole('tab', { name: '概览', exact: true }).click();
+  await app.getByRole('tab', { name: '配置', exact: true }).click();
   await app.getByCSS('[data-url]').fill('https://example.com/subscription');
   await app.getByRole('button', { name: '保存并更新', exact: true }).click();
   await expect
@@ -23,7 +23,8 @@ test('install, encrypted subscription, runtime, autostart and uninstall', async 
     .toBeVisible();
   await idle();
   expect(evaluate('mockDeviceState.config')).toBe(true);
-  await expect.element(app.getByCSS('[data-url]')).toHaveValue('');
+  // A cleared draft collapses the saved subscription back to its summary.
+  await expect.element(app.getByCSS('[data-url]')).not.toBeInTheDocument();
   await expect
     .poll(() =>
       evaluate(
@@ -38,13 +39,12 @@ test('install, encrypted subscription, runtime, autostart and uninstall', async 
   await app.getByCSS('[data-boot]').click();
   await expect.poll(() => evaluate('mockDeviceState.boot')).toBeTruthy();
   await idle();
-  await app.getByRole('button', { name: '更多操作', exact: true }).click();
-  await app.getByRole('menuitem', { name: '运行日志', exact: true }).click();
+  await app.getByRole('tab', { name: '日志', exact: true }).click();
   await expect
     .element(app.getByCSS('[data-log-panel]'))
     .toBeVisible();
-  await closeModal();
-  await app.getByRole('button', { name: '卸载', exact: true }).click();
+  await leaveLogs('设置');
+  await app.getByRole('button', { name: '卸载 Mihomo 服务', exact: true }).click();
   await expect
     .element(app.getByCSS('[data-dialog=uninstall][data-state=open]'))
     .toBeVisible();
@@ -55,7 +55,7 @@ test('install, encrypted subscription, runtime, autostart and uninstall', async 
   await expect
     .poll(() => evaluate('!mockIntents.some(x => x.action === "uninstall")'))
     .toBe(true);
-  await app.getByRole('button', { name: '卸载', exact: true }).click();
+  await app.getByRole('button', { name: '卸载 Mihomo 服务', exact: true }).click();
   await expect
     .element(app.getByCSS('[data-dialog=uninstall][data-state=open]'))
     .toBeVisible();
@@ -84,7 +84,7 @@ test('reconnect observes the original task without resubmitting', async () => {
   await expect.poll(() => evaluate('mockDeviceState.locked')).toBeTruthy();
   await reload();
   await expect.element(app.getByCSS('[data-plugin] > summary')).toBeVisible();
-  await app.getByCSS('[data-plugin] > summary').click();
+  await expand();
   await expect
     .poll(() => evaluate('mockDeviceState.task?.state === "failed"'))
     .toBeTruthy();
@@ -102,14 +102,14 @@ test('reconnect observes the original task without resubmitting', async () => {
       ),
     )
     .toBe(true);
-  await closeModal();
+  await leaveLogs();
   await evaluate('window.mockTaskFailure = ""; window.mockTaskDelayMs = 8000');
   await app.getByRole('tab', { name: '设置', exact: true }).click();
   await app.getByCSS('[data-group=maintenance] [data-action=download]').click();
   await expect.poll(() => evaluate('mockDeviceState.locked')).toBeTruthy();
   await reload();
   await expect.element(app.getByCSS('[data-plugin] > summary')).toBeVisible();
-  await app.getByCSS('[data-plugin] > summary').click();
+  await expand();
   await expect
     .poll(() =>
       evaluate(

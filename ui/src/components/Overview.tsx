@@ -1,20 +1,17 @@
-import { Menu } from '@base-ui/react/menu';
 import {
   Check,
   Download,
-  FileText,
-  MoreHorizontal,
+  ExternalLink,
   Play,
   RefreshCw,
-  ShieldCheck,
+  RotateCw,
   Square,
-  Stethoscope,
-  type LucideIcon,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { disabledReason, topTask } from '../state';
-import type { GatewayModel, Operation } from '../use-gateway';
-import { ActionButton, Button, Hint } from './ui';
+import type { GatewayModel } from '../use-gateway';
+import { ActionButton, Button, Hint, card, focus, muted } from './ui';
+import { TaskNotice } from './TaskNotice';
 
 export function stageOf(model: GatewayModel) {
   const device = model.device;
@@ -46,202 +43,263 @@ export function runtimeTitle(model: GatewayModel) {
         : '运行中';
 }
 
-export function Overview({
-  model,
-  container,
-  addSubscription,
-  confirmUninstall,
-}: {
-  model: GatewayModel;
-  container: HTMLElement;
-  addSubscription: () => void;
-  confirmUninstall: () => void;
-}) {
-  const { device, busy } = model;
-  const stage = stageOf(model);
-  const healthy = !!(
+function healthy(model: GatewayModel) {
+  const device = model.device;
+  return !!(
     device?.running &&
     device.supervisor &&
     device.listeners &&
     (!device.capabilities.capture || device.network)
   );
-  const dashboardReason = disabledReason('open-dashboard', device, !!busy);
-  const menuItem = (action: Operation, name: string, Icon: LucideIcon) => (
-    <Menu.Item
-      key={action}
-      disabled={!!disabledReason(action, device, !!busy)}
-      onClick={() => void model.perform(action)}
-      className="ufi:flex ufi:min-h-11 ufi:items-center ufi:gap-2 ufi:rounded-lg ufi:px-3 ufi:py-2 ufi:outline-hidden ufi:cursor-pointer ufi:data-[highlighted]:bg-white/10 ufi:data-[disabled]:opacity-40"
-    >
-      <Icon size={16} aria-hidden />
-      {name}
-    </Menu.Item>
-  );
+}
+
+/** Status color: green healthy, amber transitional, gray stopped, blue setup, red unknown. */
+function tone(model: GatewayModel) {
+  const device = model.device;
+  if (!device) return model.busy ? '#0a84ff' : '#ff6961';
+  if (healthy(model)) return '#30d158';
+  if (device.running || device.capture) return '#ff9f0a';
+  return stageOf(model) === 'ready' ? '#8e8e93' : '#0a84ff';
+}
+
+export function StatusDot({ model }: { model: GatewayModel }) {
+  const color = tone(model);
   return (
-    <div
-      data-overview
-      className="ufi:rounded-2xl ufi:bg-[var(--mh-group)] ufi:p-5"
-    >
-      <div className="ufi:flex ufi:items-start ufi:justify-between">
+    <span aria-hidden className="ufi:relative ufi:flex ufi:size-2.5 ufi:shrink-0">
+      {healthy(model) && (
         <span
-          className={clsx(
-            'ufi:flex ufi:size-14 ufi:items-center ufi:justify-center ufi:rounded-2xl',
-            healthy
-              ? 'ufi:bg-emerald-400/10 ufi:text-[#30d158]'
-              : 'ufi:bg-blue-400/10 ufi:text-[#0a84ff]',
-          )}
-        >
-          <ShieldCheck size={30} aria-hidden />
-        </span>
-        <Menu.Root modal={false}>
-          <Menu.Trigger
-            render={<Button icon={MoreHorizontal} aria-label="更多操作" />}
-          />
-          <Menu.Portal container={container}>
-            <Menu.Positioner
-              align="end"
-              sideOffset={8}
-              collisionPadding={12}
-              className="ufi:z-[2147483639]"
+          className="ufi:absolute ufi:inset-0 ufi:animate-ping ufi:rounded-full ufi:opacity-60 ufi:motion-reduce:hidden"
+          style={{ background: color }}
+        />
+      )}
+      <span className="ufi:relative ufi:size-2.5 ufi:rounded-full" style={{ background: color }} />
+    </span>
+  );
+}
+
+function subtitle(model: GatewayModel) {
+  const { device } = model;
+  if (!device)
+    return model.busy === 'uninstall'
+      ? '正在停止服务并清理安装文件'
+      : model.stateError.split('\n')[0] || '可重新检测，或卸载现有安装后重新安装';
+  if (healthy(model))
+    return [
+      device.capabilities.capture ? '本地接管就绪' : '网络由系统管理',
+      device.coreVersion && `内核 ${device.coreVersion}`,
+    ].filter(Boolean).join(' · ');
+  if (device.running) return '可在日志中查看启动过程';
+  if (device.capture) return '代理已退出，网络规则仍需清理';
+  return stageOf(model) === 'ready' ? '随时可以启动' : '完成以下步骤即可启动代理';
+}
+
+const steps = [
+  ['安装 Mihomo 服务', 'service'],
+  ['安装 Mihomo 内核', 'core'],
+  ['添加订阅', 'config'],
+] as const;
+
+function Setup({
+  model,
+  addSubscription,
+  openSettings,
+}: {
+  model: GatewayModel;
+  addSubscription: () => void;
+  openSettings: () => void;
+}) {
+  const device = model.device!;
+  const current = steps.findIndex(([, key]) => !device[key]);
+  const version = { service: device.version, core: device.coreVersion, config: '' };
+  return (
+    <>
+      <ol aria-label="安装进度" className="ufi:m-0 ufi:mb-4 ufi:list-none ufi:p-0">
+        {steps.map(([label, key], index) => {
+          const done = device[key];
+          return (
+            <li
+              key={key}
+              aria-current={index === current ? 'step' : undefined}
+              className={clsx(
+                'ufi:relative ufi:flex ufi:min-h-11 ufi:items-center ufi:gap-3',
+                !done && index !== current && muted,
+              )}
             >
-              <Menu.Popup
-                data-ufi-menu
-                className="ufi:z-[2147483639] ufi:min-w-48 ufi:rounded-xl ufi:border ufi:border-solid ufi:border-[var(--mh-line)] ufi:bg-[var(--mh-group)] ufi:p-1.5 ufi:text-sm ufi:text-[var(--mh-text)] ufi:shadow-xl"
-              >
-                {menuItem('refresh', '刷新状态', RefreshCw)}
-                {menuItem('logs', '运行日志', FileText)}
-                {menuItem('diagnose', '网络诊断', Stethoscope)}
-                <Menu.Item
-                  disabled={!device?.task}
-                  onClick={() => void model.showTask()}
-                  className="ufi:flex ufi:min-h-11 ufi:items-center ufi:gap-2 ufi:rounded-lg ufi:px-3 ufi:py-2 ufi:outline-hidden ufi:cursor-pointer ufi:data-[highlighted]:bg-white/10 ufi:data-[disabled]:opacity-40"
-                >
-                  <FileText size={16} aria-hidden />
-                  最近任务
-                </Menu.Item>
-                <Menu.Separator className="ufi:my-1 ufi:h-px ufi:bg-white/10" />
-                {menuItem(
-                  device ? 'restart' : 'stop',
-                  device ? '重启代理' : '停止代理',
-                  device ? RefreshCw : Square,
+              {index < steps.length - 1 && (
+                <span
+                  aria-hidden
+                  className={clsx(
+                    'ufi:absolute ufi:left-3 ufi:top-[calc(50%+14px)] ufi:h-[calc(100%-28px)] ufi:w-px ufi:-translate-x-1/2',
+                    done ? 'ufi:bg-[#30d158]/50' : 'ufi:bg-[var(--mh-line)]',
+                  )}
+                />
+              )}
+              <span
+                className={clsx(
+                  'ufi:flex ufi:size-6 ufi:shrink-0 ufi:items-center ufi:justify-center ufi:rounded-full ufi:text-xs ufi:font-semibold ufi:tabular-nums',
+                  done
+                    ? 'ufi:bg-[#30d158]/20 ufi:text-[#30d158]'
+                    : index === current
+                      ? 'ufi:bg-[var(--mh-accent)] ufi:text-white ufi:ring-4 ufi:ring-[var(--mh-accent)]/25'
+                      : 'ufi:bg-[var(--mh-fill-strong)]',
                 )}
-              </Menu.Popup>
-            </Menu.Positioner>
-          </Menu.Portal>
-        </Menu.Root>
-      </div>
-      <h2
-        data-status
-        className="ufi:m-0 ufi:mt-4 ufi:text-[28px] ufi:font-semibold ufi:tracking-tight"
-      >
-        {runtimeTitle(model)}
-      </h2>
-      <p className="ufi:m-0 ufi:mt-1 ufi:mb-5 ufi:text-sm ufi:opacity-60">
-        {!device
-          ? model.busy === 'uninstall' ? '正在停止服务并清理安装文件' : model.stateError.split('\n')[0] || '可重新检测，或卸载现有安装后重新安装'
-          : healthy
-            ? device.capabilities.capture
-              ? '本地接管就绪'
-              : '网络由系统管理'
-            : stage === 'core'
-              ? '请先安装 Mihomo 内核'
-              : stage === 'subscription'
-                ? '添加订阅后即可启动'
-                : stage === 'agent' || stage === 'service'
-                  ? '请先安装 Mihomo 服务'
-                  : device.running
-                    ? '可在更多菜单中查看日志'
-                    : '随时可以启动'}
-      </p>
-      {stage === 'unknown' ? (
-        <ActionButton
-          model={model}
-          action="refresh"
-          label="重新检测"
-          icon={RefreshCw}
-          primary
-        />
-      ) : device?.running || device?.capture || stage === 'ready' ? (
-        <ActionButton
-          model={model}
-          action={device?.running || device?.capture ? 'stop' : 'start'}
-          label={device?.running ? '停止代理' : device?.capture ? '清理残留规则' : '启动代理'}
-          icon={device?.running || device?.capture ? Square : Play}
-          primary
-        />
-      ) : stage === 'agent' || stage === 'service' ? (
-        <ActionButton
-          model={model}
-          action="install"
-          label="安装 Mihomo 服务"
-          icon={Download}
-          primary
-        />
-      ) : stage === 'core' ? (
-        <ActionButton
-          model={model}
-          action="download"
-          label="安装 Mihomo 内核"
-          icon={Download}
-          primary
-        />
+              >
+                {done ? <Check size={14} strokeWidth={3} aria-label="已完成" /> : index + 1}
+              </span>
+              <span className={clsx('ufi:min-w-0 ufi:flex-1', index === current && 'ufi:font-medium')}>
+                {label}
+              </span>
+              {done && version[key] && (
+                <span className={`ufi:text-xs ufi:tabular-nums ${muted}`}>{version[key]}</span>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+      {current === 0 ? (
+        <>
+          <ActionButton model={model} action="install" label="安装 Mihomo 服务" icon={Download} primary />
+          {!device.agent && (
+            <Hint>
+              从 GitHub 下载较慢？
+              <button
+                type="button"
+                onClick={openSettings}
+                className={`ufi:m-0 ufi:cursor-pointer ufi:border-0 ufi:bg-transparent ufi:p-0 ufi:text-xs ufi:text-[#0a84ff] ${focus}`}
+              >
+                设置下载加速
+              </button>
+            </Hint>
+          )}
+        </>
+      ) : current === 1 ? (
+        <ActionButton model={model} action="download" label="安装 Mihomo 内核" icon={Download} primary />
       ) : (
         <Button
           full
           variant="primary"
-          disabled={!!busy || device?.locked}
+          disabled={!!model.busy || device.locked}
           onClick={addSubscription}
         >
           添加订阅
         </Button>
       )}
-      {stage === 'unknown' && (
-        <div className="ufi:mt-3">
-          <Button full variant="danger" disabled={!!busy} loading={busy === 'uninstall'} onClick={confirmUninstall}>
-            {busy === 'uninstall' ? '正在卸载现有安装…' : '卸载现有安装'}
-          </Button>
-          <Hint>卸载不依赖状态读取；完成后可重新初始化安装。</Hint>
+    </>
+  );
+}
+
+function Runtime({ model }: { model: GatewayModel }) {
+  const { device, busy } = model;
+  if (!device?.running) {
+    return device?.capture ? (
+      <ActionButton model={model} action="stop" label="清理残留规则" icon={Square} primary />
+    ) : (
+      <ActionButton model={model} action="start" label="启动代理" icon={Play} primary />
+    );
+  }
+  const reason = disabledReason('open-dashboard', device, !!busy);
+  return (
+    <>
+      <Button
+        data-action="open-dashboard"
+        full
+        variant="primary"
+        icon={ExternalLink}
+        disabled={!!reason}
+        title={reason}
+        loading={busy === 'open-dashboard'}
+        onClick={() => void model.openDashboard()}
+      >
+        {busy === 'open-dashboard' ? '正在打开面板…' : '打开面板'}
+      </Button>
+      <div className="ufi:mt-2 ufi:grid ufi:grid-cols-2 ufi:gap-2">
+        <ActionButton model={model} action="restart" label="重启代理" icon={RotateCw} full />
+        <ActionButton model={model} action="stop" label="停止代理" icon={Square} full />
+      </div>
+      <Hint>{reason}</Hint>
+    </>
+  );
+}
+
+export function Overview({
+  model,
+  addSubscription,
+  openSettings,
+  confirmUninstall,
+}: {
+  model: GatewayModel;
+  addSubscription: () => void;
+  openSettings: () => void;
+  confirmUninstall: () => void;
+}) {
+  const { device, busy } = model;
+  const stage = stageOf(model);
+  return (
+    <div data-overview className={`ufi:relative ufi:overflow-hidden ufi:p-4 ${card}`}>
+      <div
+        aria-hidden
+        className="ufi:pointer-events-none ufi:absolute ufi:-left-20 ufi:-top-24 ufi:size-64 ufi:rounded-full ufi:opacity-20 ufi:blur-3xl ufi:transition-colors ufi:duration-700"
+        style={{ background: tone(model) }}
+      />
+      <div className="ufi:relative ufi:mb-4 ufi:flex ufi:items-start ufi:gap-3">
+        <span className="ufi:flex ufi:h-8 ufi:items-center">
+          <StatusDot model={model} />
+        </span>
+        <div className="ufi:min-w-0 ufi:flex-1">
+          <h2 data-status className="ufi:m-0 ufi:text-xl ufi:font-semibold ufi:leading-8 ufi:tracking-tight">
+            {runtimeTitle(model)}
+          </h2>
+          <p className={`ufi:m-0 ufi:text-sm ${muted}`}>{subtitle(model)}</p>
         </div>
-      )}
-      {device?.locked && !topTask(device.task) && <Hint error>控制锁尚未释放，请查看最近任务和运行日志。</Hint>}
-      {device?.service && (
-        <div className="ufi:mt-3">
+        {stage !== 'unknown' && (
           <Button
-            data-action="open-dashboard"
+            variant="ghost"
+            icon={RefreshCw}
+            aria-label="刷新状态"
+            title="刷新状态"
+            className="ufi:-mr-2 ufi:-mt-2"
+            disabled={!!busy}
+            loading={busy === 'refresh'}
+            onClick={() => void model.perform('refresh')}
+          />
+        )}
+      </div>
+      <div className="ufi:relative">
+        {stage === 'unknown' ? (
+          <>
+            <ActionButton model={model} action="refresh" label="重新检测" icon={RefreshCw} primary />
+            <div className="ufi:mt-2 ufi:grid ufi:grid-cols-2 ufi:gap-2">
+              <ActionButton model={model} action="stop" label="停止代理" full />
+              <Button full variant="danger" disabled={!!busy} loading={busy === 'uninstall'} onClick={confirmUninstall}>
+                {busy === 'uninstall' ? '正在卸载…' : '卸载现有安装'}
+              </Button>
+            </div>
+            <Hint>卸载不依赖状态读取；完成后可重新安装。</Hint>
+          </>
+        ) : device?.running || device?.capture || stage === 'ready' ? (
+          <Runtime model={model} />
+        ) : (
+          <Setup model={model} addSubscription={addSubscription} openSettings={openSettings} />
+        )}
+        {model.error ? (
+          <Button
             full
-            disabled={!!dashboardReason}
-            title={dashboardReason}
-            loading={busy === 'open-dashboard'}
-            onClick={() => void model.openDashboard()}
+            variant="danger"
+            className="ufi:mt-3"
+            onClick={() => {
+              model.setLogSource('details');
+              model.setDetailOpen(true);
+            }}
           >
-            {busy === 'open-dashboard' ? '正在打开面板…' : '打开面板'}
+            查看错误详情
           </Button>
-          <Hint>{dashboardReason}</Hint>
-        </div>
-      )}
-      {device && stage !== 'ready' && (
-        <div
-          aria-label="安装进度"
-          className="ufi:mt-4 ufi:flex ufi:justify-between ufi:gap-2 ufi:text-xs ufi:opacity-70"
-        >
-          {[
-            ['服务', device.service],
-            ['内核', device.core],
-            ['配置', device.config],
-          ].map(([label, done]) => (
-            <span
-              key={String(label)}
-              className={clsx(
-                'ufi:flex ufi:items-center ufi:gap-1',
-                done && 'ufi:text-[#30d158]',
-              )}
-            >
-              {done && <Check size={13} aria-hidden />}
-              {label}
-            </span>
-          ))}
-        </div>
-      )}
+        ) : (
+          topTask(model.task) && model.task && <TaskNotice model={model} job={model.task} />
+        )}
+        {device?.locked && !topTask(device.task) && (
+          <Hint error>控制锁尚未释放，请查看最近任务和日志。</Hint>
+        )}
+      </div>
     </div>
   );
 }

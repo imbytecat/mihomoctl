@@ -31,6 +31,7 @@ beforeEach(async () => {
   for (const key of Object.keys(sessionStorage)) {
     if (key.startsWith('ufi-mock-')) sessionStorage.removeItem(key);
   }
+  localStorage.removeItem('mihomoctl-open');
   errors = [];
   await page.viewport(1280, 900);
   frame = document.createElement('iframe');
@@ -70,11 +71,26 @@ export async function idle() {
       .toBe(0);
   }
 }
-export async function closeModal(name = '关闭详情') {
-  await app.getByRole('button', { name, exact: true }).click();
-  if (name === '关闭详情') await expect.element(app.getByCSS('[data-log-panel]')).not.toBeVisible();
-  else await expect.element(app.getByCSS('[data-dialog]')).not.toBeInTheDocument();
+export async function leaveLogs(tab = '配置') {
+  await app.getByRole('tab', { name: tab, exact: true }).click();
+  await expect.element(app.getByCSS('[data-log-panel]')).not.toBeVisible();
   await idle();
+}
+/** Override YAML as shown by CodeMirror: one .cm-line per document line, placeholder excluded. */
+export function yamlText() {
+  return [...app.getByCSS('#ufi-controller-yaml').element().querySelectorAll('.cm-line')]
+    .map((line) => [...line.childNodes]
+      .filter((node) => !(node as Element).classList?.contains('cm-placeholder'))
+      .map((node) => node.textContent)
+      .join(''))
+    .join('\n');
+}
+/** Opens the plugin if needed; it remembers being expanded across reloads. */
+export async function expand() {
+  const summary = app.getByCSS('[data-plugin] > summary');
+  await expect.element(summary).toBeVisible();
+  if (!(app.getByCSS('[data-plugin]').element() as HTMLDetailsElement).open) await summary.click();
+  await expect.element(app.getByCSS('[data-gateway-body]')).toBeVisible();
 }
 export async function open(state: string) {
   const loaded = new Promise<void>((resolve) =>
@@ -82,7 +98,7 @@ export async function open(state: string) {
   );
   frame.src = `/tests/browser/host.html?state=${state}`;
   await loaded;
-  await app.getByCSS('[data-plugin] > summary').click();
+  await expand();
   await idle();
 }
 export async function reload() {
@@ -91,4 +107,6 @@ export async function reload() {
   );
   frame.contentWindow!.location.reload();
   await loaded;
+  // Every caller had expanded the plugin, which must survive the reload.
+  await expect.element(app.getByCSS('[data-gateway-body]')).toBeVisible();
 }

@@ -4,13 +4,73 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>mihomoctl · UFI 开发预览</title>
+    <!-- Subset of UFI-TOOLS style.css: theme variables and the global rules the plugin must survive. -->
+    <style>
+      :root {
+        --dark-text-color: #eee;
+        --dark-card-bg: #00000024;
+        --dark-bg-color: #1f2937;
+        --dark-bgi-color: #0000009c;
+        --dark-tag-color: #4b556380;
+        --dark-btn-color: #87ceeb61;
+        --dark-btn-disabled-color: #80808073;
+        --dark-btn-color-active: #018ad8a8;
+        --blur-rate: 4px;
+      }
+      body {
+        margin: 0;
+        font-weight: bold;
+        color: var(--dark-text-color);
+        word-break: break-all;
+        text-shadow: -1px -1px 10px rgba(0, 0, 0, 0.3);
+        background: radial-gradient(circle at 20% 10%, #355c7d, transparent 50%),
+          radial-gradient(circle at 80% 60%, #6c5b7b, transparent 45%), var(--dark-bg-color);
+        background-attachment: fixed;
+        min-height: 100vh;
+      }
+      button {
+        padding: 5px 10px;
+        background-color: var(--dark-btn-color);
+        border: 1px solid transparent;
+        border-radius: 8px;
+        color: var(--dark-text-color);
+        font-size: 12px;
+        backdrop-filter: blur(10px);
+      }
+      button:hover { box-shadow: 0 0 10px 0 var(--dark-btn-color); }
+      button:active { border: 1px solid pink; }
+      input { border-radius: 6px; border: 1px solid skyblue; color: var(--dark-text-color) !important; background: transparent; }
+      textarea { font-size: 10px !important; background-color: var(--dark-bgi-color); }
+      a { color: pink; }
+      .functions-container { min-height: 120px; border-radius: 10px; background: var(--dark-card-bg); backdrop-filter: blur(var(--blur-rate)); }
+    </style>
   </head>
   <body>
-    <main style="max-width: 600px; margin: auto; font-family: sans-serif">
+    <!-- UFI's .container is capped at 1260px. -->
+    <main style="max-width: 1260px; margin: auto; padding: 12px; font-family: sans-serif">
       <h1>UFI 模拟页面</h1>
-      <p>仅供开发，所有设备操作均为模拟。</p>
+      <p>
+        仅供开发，所有设备操作均为模拟。主题：
+        <select id="theme">
+          <option value="">默认</option>
+          <option value="light">浅色背景 / 深色文字</option>
+          <option value="opaque">纯色无模糊</option>
+        </select>
+      </p>
       <div class="functions-container"></div>
     </main>
+    <script>
+      const presets = {
+        light: { '--dark-text-color': 'rgb(30, 30, 30)', '--dark-tag-color': 'rgba(255, 255, 255, 0.45)', '--dark-card-bg': '#ffffff40', '--dark-btn-color-active': 'hsl(330 80% 45% / 90%)' },
+        opaque: { '--dark-tag-color': 'rgba(40, 44, 52, 1)', '--blur-rate': '0' },
+      };
+      const select = document.getElementById('theme');
+      select.value = localStorage.getItem('ufi-dev-theme') || '';
+      for (const [key, value] of Object.entries(presets[select.value] || {}))
+        document.documentElement.style.setProperty(key, value);
+      if (select.value === 'light') document.body.style.background = 'linear-gradient(135deg, #fbe3e8, #d7ecf9)';
+      select.onchange = () => { localStorage.setItem('ufi-dev-theme', select.value); location.reload(); };
+    </script>
     <script type="module" src="/main.ts"></script>
   </body>
 </html>

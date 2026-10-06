@@ -2,28 +2,60 @@
 @import "tailwindcss/theme.css" layer(theme) prefix(ufi);
 @source "./";
 
+/*
+ * Preflight's border reset, scoped to the plugin body. Portals keep sonner's toast borders
+ * and CodeMirror keeps its own (the text cursor is a border).
+ */
+#mihomoctl :not(.cm-editor *),
+#mihomoctl :not(.cm-editor *)::before,
+#mihomoctl :not(.cm-editor *)::after {
+  border: 0 solid;
+}
 /* Unlayered, scoped utilities outrank the host's unlayered element styles. */
 :is(#mihomoctl, #mihomoctl-portals) {
   @tailwind utilities;
 }
 
+/*
+ * Follow the UFI theme (user-chosen hue, opacity, text gray and blur). Neutral fills
+ * derive from the text color so light and dark host themes both keep contrast.
+ * Fallbacks describe a standalone dark surface.
+ */
 :is(#mihomoctl, #mihomoctl-portals) {
   --mh-text: var(--dark-text-color, #f5f5f7);
-  --mh-bg: var(--dark-bg-color, #111114);
-  --mh-group: var(--dark-btn-color, #1c1c1f);
-  --mh-line: #80808026;
+  --mh-bg: var(--dark-card-bg, #111114);
+  --mh-group: var(--dark-tag-color, #1c1c1f);
+  --mh-popup: var(--dark-bg-color, #1c1c1f);
+  --mh-accent: var(--dark-btn-color-active, #0a84ff);
+  --mh-blur: var(--blur-rate, 0px);
+  --mh-muted: color-mix(in srgb, var(--mh-text) 62%, transparent);
+  --mh-line: color-mix(in srgb, var(--mh-text) 12%, transparent);
+  --mh-fill: color-mix(in srgb, var(--mh-text) 7%, transparent);
+  --mh-fill-strong: color-mix(in srgb, var(--mh-text) 14%, transparent);
+  --mh-well: color-mix(in srgb, #000 28%, transparent);
   color: var(--mh-text);
   font:
     14px/1.5 -apple-system,
     BlinkMacSystemFont,
     'Segoe UI',
+    'PingFang SC',
+    'Noto Sans CJK SC',
     sans-serif;
+  /* The UFI body sets these for its own widgets. */
+  text-shadow: none;
+  word-break: normal;
+  overflow-wrap: break-word;
+  -webkit-tap-highlight-color: transparent;
 }
 #mihomoctl {
   margin: 14px 0;
 }
 :is(#mihomoctl, #mihomoctl-portals) :where(button, input, textarea, select) {
   font-family: inherit;
+  text-shadow: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 :is(#mihomoctl, #mihomoctl-portals) *,
 :is(#mihomoctl, #mihomoctl-portals) *::before,
