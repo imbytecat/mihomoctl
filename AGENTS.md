@@ -15,7 +15,7 @@
 - 存储 Module：internal/storage 使用 sqlc + database/sql + modernc SQLite，拥有类型化状态表；YAML、日志和运行文件留在文件系统。fsutil、host、download、redact 是共享基础实现。
 - 日志：UFI 运行输出与共享 worker 任务记录按来源读取；`log-read` 使用文件身份、偏移和边界摘要识别轮换，只返回完整脱敏行。前端用 React Virtuoso 展示有界累计记录，滚动跟随不控制数据收集，不把内核运行输出重复拼入实时任务详情。
 - 前端：ui/src/transport/ufi 只处理 UFI 通信和引导；gateway.ts 处理任务观察与展示；use-gateway.ts 管草稿和交互；components/ 管视图。CSS 仅留主题与宿主隔离，其余用 Tailwind className。
-- 无样式交互组件统一使用 Base UI；覆写 YAML 用 CodeMirror 6 编辑（高亮、行号），不另做内联诊断，校验仍由 config.ts 在失焦与提交时完成。Tailwind 4 使用官方 Vite 插件、ufi: 前缀和容器内的无 layer utilities；不加载 preflight，避免宿主样式覆盖插件或插件样式外溢，仅在插件容器内重置边框（CodeMirror 除外）。`:where()` 包裹的工具类（如 divide-*）会被该重置覆盖，不要使用。
+- 无样式交互组件统一使用 Base UI；覆写 YAML 用 CodeMirror 6 编辑，内联诊断直接用 @codemirror/lint 展示 `yaml` 解析器自身的错误与位置，不另维护规则；提交前仍由 config.ts 整体校验。Tailwind 4 使用官方 Vite 插件、ufi: 前缀和容器内的无 layer utilities；不加载 preflight，避免宿主样式覆盖插件或插件样式外溢，仅在插件容器内重置边框（CodeMirror 除外）。`:where()` 包裹的工具类（如 divide-*）会被该重置覆盖，不要使用。
 - 视觉跟随 UFI 主题变量（--dark-text-color、--dark-card-bg、--dark-tag-color、--dark-btn-color-active、--blur-rate），中性色由文字色派生以兼容浅色主题；开发预览 dev/index.html 模拟宿主的全局样式与主题。
 - 修改加载协议时核对下方 UFI 官方来源；没有文档保证的行为不能从其他插件推断。
 - UFI SDK 位于 ui/packages/ufi-sdk，拥有接口定义、运行时校验、签名和宿主适配；mihomoctl 按需导入，业务加密与命令退出标记仍归 transport。宿主入口使用 requests.js 的裸全局 originFetch，自行签名设备请求，缺失时明确报错；不调用 window.fetch 包装。修改 SDK 时核对其 README 中的源码／文档差异，测试覆盖全部路由清单和认证、上传、取消行为。

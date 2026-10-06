@@ -8,12 +8,15 @@ import {
   keymap,
   lineNumbers,
   placeholder as placeholderText,
+  tooltips,
 } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { HighlightStyle, bracketMatching, indentOnInput, indentUnit, syntaxHighlighting } from '@codemirror/language';
 import { yaml } from '@codemirror/lang-yaml';
+import { linter, lintGutter } from '@codemirror/lint';
 import { tags } from '@lezer/highlight';
 import { clsx } from 'clsx';
+import { parseDocument } from 'yaml';
 
 // Syntax colors lean toward the host text color so they stay legible on light and dark themes.
 const tint = (color: string) => `color-mix(in srgb, ${color} 75%, var(--mh-text))`;
@@ -44,6 +47,24 @@ const theme = EditorView.theme({
   },
   '.cm-placeholder': { color: 'var(--mh-muted)' },
   '.cm-matchingBracket': { backgroundColor: 'var(--mh-fill-strong)', outline: 'none' },
+  '.cm-tooltip': {
+    backgroundColor: 'var(--mh-popup)',
+    color: 'var(--mh-text)',
+    border: '1px solid var(--mh-line)',
+    borderRadius: '10px',
+    overflow: 'hidden',
+  },
+});
+
+// YAML syntax errors as reported by the `yaml` parser itself, at its own positions.
+const syntaxLint = linter((view) => {
+  const text = view.state.doc.toString();
+  return parseDocument(text, { prettyErrors: false }).errors.map((error) => ({
+    from: Math.min(error.pos[0], text.length),
+    to: Math.min(error.pos[1], text.length),
+    severity: 'error' as const,
+    message: error.message,
+  }));
 });
 
 /** CodeMirror YAML editor driven like a controlled input. */
@@ -103,6 +124,10 @@ export function YamlEditor({
           keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
           yaml(),
           syntaxHighlighting(highlight),
+          syntaxLint,
+          lintGutter(),
+          // Fixed tooltips inside the plugin's container query would be positioned against it.
+          tooltips({ parent: document.getElementById('mihomoctl-portals') ?? undefined }),
           placeholderText(placeholder),
           theme,
           settings.of(dynamic()),

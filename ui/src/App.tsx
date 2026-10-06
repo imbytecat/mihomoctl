@@ -49,7 +49,7 @@ export default function Gateway({ container }: { container: HTMLElement }) {
         container,
       )}
       {/* Container query: layout follows the plugin's own width, not the viewport. Containment and
-          backdrop-filter trap fixed descendants, so the fullscreen log viewer portals out. */}
+          backdrop-filter trap fixed descendants, so overlays (fullscreen logs, editor tooltips) portal out. */}
       <details
         data-plugin
         open={initiallyOpen}

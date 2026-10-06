@@ -101,6 +101,8 @@ test('controller transactions, encrypted secrets and task details', async () => 
   await idle();
   await app.getByRole('tab', { name: '配置', exact: true }).click();
   await expect.element(app.getByCSS('#ufi-controller-yaml-error')).toBeVisible();
+  // The parser's syntax error is also marked inline in the editor gutter.
+  await expect.element(app.getByCSS('[data-yaml-editor] .cm-lint-marker-error')).toBeVisible();
   expect(evaluate('mockIntents.length')).toBe(0);
   await openDashboard(9090, 'mock-controller-key-not-a-real-secret');
   await app.getByCSS('#ufi-controller-yaml').fill(panelYaml(9191, 'secret: short\n'));
